@@ -26,7 +26,6 @@ folds = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 folds = folds.split(np.arange(len(df_train)), y=df_train[col_target]) # 各foldターゲットのラベルの分布がそろうようにする = stratified K fold
 folds = list(folds)
 
-
 params = {
     'objective': 'binary', # 目的->2値分類
     'num_threads': -1,
@@ -49,8 +48,8 @@ for fold in range(5):
     x_test = df_test[cols_feature]
 
     print("fold: {}, train: {}, valid: {}".format(fold+1, len(x_train), len(x_valid)))
-    train_data = lgb.Dataset(x_train, label=y_train, categorical_feature=cols_cat)
-    valid_data = lgb.Dataset(x_valid, label=y_valid, categorical_feature=cols_cat)
+    train_data = lgb.Dataset(x_train, label=y_train)
+    valid_data = lgb.Dataset(x_valid, label=y_valid)
 
     model = lgb.train(
         params, # モデルのパラメータ
