@@ -47,9 +47,9 @@ for fold in range(5):
     y_valid = df_train.iloc[folds[fold][1]][col_target]
     x_test = df_test[cols_feature]
 
-    print("fold: {}, train: {}, valid: {}".format(fold+1, len(x_train), len(x_valid)))
-    train_data = lgb.Dataset(x_train, label=y_train)
-    valid_data = lgb.Dataset(x_valid, label=y_valid)
+    print(f'fold: {fold+1}, train: {len(x_train)}, valid: {len(x_valid)}')
+    train_data = lgb.Dataset(x_train, label=y_train, categorical_feature=cols_cat)
+    valid_data = lgb.Dataset(x_valid, label=y_valid, categorical_feature=cols_cat)
 
     model = lgb.train(
         params, # モデルのパラメータ
@@ -70,6 +70,9 @@ for fold in range(5):
     tmp['fold'] = fold + 1
     df_feature_importance = pd.concat([df_feature_importance, tmp], axis=0)
 
+
+score = metrics.roc_auc_score(df_train[col_target], preds_valid)
+print(f'CV AUC: {score:.6f}')
 
 df_tmp = df_feature_importance.groupby('feature').agg('mean').reset_index()
 df_tmp = df_tmp.sort_values('importance', ascending=False)
