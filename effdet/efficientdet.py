@@ -77,8 +77,7 @@ class EfficientDet(nn.Module):
         scores = scores[:, scores_over_thresh, :]
         anchors_nms_idx = nms(
             transformed_anchors[0, :, :], scores[0, :, 0], iou_threshold=self.iou_threshold)
-        nms_scores, nms_class = classification[0, anchors_nms_idx, :].max(
-            dim=1)
+        nms_scores, nms_class = classification[0, anchors_nms_idx, :].max(dim=1)
         return [nms_scores, nms_class, transformed_anchors[0, anchors_nms_idx, :]]
 
     # def loss(self, inputs, annotations, criterion):

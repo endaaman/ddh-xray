@@ -54,7 +54,6 @@ class FocalLoss(nn.Module):
             if bbox_annotation.shape[0] == 0:
                 regression_losses.append(torch.tensor(0).float().to(device))
                 classification_losses.append(torch.tensor(0).float().to(device))
-
                 continue
 
             classification = torch.clamp(classification, 1e-4, 1.0 - 1e-4)
