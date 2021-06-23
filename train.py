@@ -13,11 +13,12 @@ class MyTrainer(Trainer):
         parser.add_argument('--network', default='efficientdet-d0', type=str, help='efficientdet-[d0, d1, ..]')
 
     def run_train(self):
-        model = EfficientDet(num_classes=1,
-                             network=self.args.network,
-                             W_bifpn=EFFDET_PARAMS[self.args.network]['W_bifpn'],
-                             D_bifpn=EFFDET_PARAMS[self.args.network]['D_bifpn'],
-                             D_class=EFFDET_PARAMS[self.args.network]['D_class'])
+        model = EfficientDet(
+            num_classes=1,
+            network=self.args.network,
+            W_bifpn=EFFDET_PARAMS[self.args.network]['W_bifpn'],
+            D_bifpn=EFFDET_PARAMS[self.args.network]['D_bifpn'],
+            D_class=EFFDET_PARAMS[self.args.network]['D_class'])
 
         img = torch.randn(2, 3, 512, 512)
         # img = Image.open('data/misc/piece.jpg')

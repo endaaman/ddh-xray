@@ -16,18 +16,13 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 
+from utils import Annotation
+from augmentation import Augmentation
 
-
-class Annotation(RecordClass):
-    id: int
-    x0: float
-    y0: float
-    x1: float
-    y1: float
 
 class Item(RecordClass):
     image: object # Image
-    annot: Annotation
+    annots: Annotation
 
 
 class BaseDataset(Dataset):
@@ -74,7 +69,7 @@ def read_annotation(path):
         parted  = line.split(' ')
         id = int(parted[0])
         x, y, w, h = [float(v) for v in parted[1:]]
-        annot.append(Annotation(id, x, y, x + w, y + h))
+        annot.append(Annotation(id, np.array([x, y, x + w, y + h])))
     return annot
 
 class XrayDataset(BaseDataset):
@@ -112,13 +107,31 @@ class XrayDataset(BaseDataset):
 
     def __getitem__(self, idx):
         item = self.items[idx]
-        return self.transform_x(item.image), self.transform_y(item.annot)
+        x = item.image
+        y = item.annots
+        if self.augmentation:
+            x, y = self.augmentation(x, y)
+        print(y[0])
+        return self.transform(x, y)
 
 
 if __name__ == '__main__':
     ds = XrayDataset()
 
+    transform_x = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+    ])
+    transform_y = transforms.Compose([
+        lambda aa: [[a.id, *a.rect] for a in aa],
+        lambda y: torch.tensor(y, dtype=torch.float),
+    ])
+    ds.set_transforms(transform_x, transform_y)
+
+    ds.set_augmentaion(Augmentation())
+
+
     for (x, y) in ds:
-        print(x)
-        print(y)
+        # print(x)
+        print(y[0])
         break
