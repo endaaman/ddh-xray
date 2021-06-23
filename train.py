@@ -1,84 +1,39 @@
-import os
-import copy
+import json
 from PIL import Image
-import numpy as np
-from matplotlib import pyplot as plt
 import torch
-import torch.nn as nn
-import pandas as pd
+from torchvision import transforms
 
-from sklearn.model_selection import StratifiedKFold, KFold
-from sklearn import metrics
-import lightgbm as lgb
-
-from common import *
+from effdet import EfficientDet, FocalLoss, EFFDET_PARAMS
+from endaaman import Trainer
 
 
-df = pd.read_excel('data/table.xlsx')
-df_train = df[df['test'] == 0]
-df_test = df[df['test'] == 1]
+class MyTrainer(Trainer):
 
-col_target = 'treatment'
-cols_feature = df.columns.values.tolist()[1:-1] # exclude label, treatment
-cols_cat = copy.deepcopy(cols_feature)
+    def arg_common(self, parser):
+        parser.add_argument('--network', default='efficientdet-d0', type=str, help='efficientdet-[d0, d1, ..]')
 
-folds = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-folds = folds.split(np.arange(len(df_train)), y=df_train[col_target]) # 各foldターゲットのラベルの分布がそろうようにする = stratified K fold
-folds = list(folds)
+    def run_train(self):
+        model = EfficientDet(num_classes=1,
+                             network=self.args.network,
+                             W_bifpn=EFFDET_PARAMS[self.args.network]['W_bifpn'],
+                             D_bifpn=EFFDET_PARAMS[self.args.network]['D_bifpn'],
+                             D_class=EFFDET_PARAMS[self.args.network]['D_class'])
 
-params = {
-    'objective': 'binary', # 目的->2値分類
-    'num_threads': -1,
-    'bagging_seed': 42, # random seed の固定
-    'random_state': 42, # random seed の固定
-    'boosting': 'gbdt',
-    'metric': 'auc', # 評価変数->AUC
-    'verbosity': -1,
-}
+        img = torch.randn(1, 3, 512, 512)
+        # annotations = torch.tensor([[[0, 0, 0, 0, 1, 1]]], dtype=torch.long)
+        bb =torch.tensor([[
+            # [1, 0, 0, 1, 0.5, 0.4],
+            [0, 10, 10, 100, 100, 1], # batch, left, top, right, bottom, id
+        ]])
+        criterion = FocalLoss()
+        classification, regression, anchors = model(img)
+        classification_loss, regression_loss = criterion(classification, regression, anchors, bb, 'cpu')
+        print(classification_loss)
+        print(regression_loss)
 
-preds_valid = np.zeros([len(df_train)], np.float32)
-preds_test = np.zeros([5, len(df_test)], np.float32)
-df_feature_importance = pd.DataFrame()
-
-for fold in range(5):
-    x_train = df_train.iloc[folds[fold][0]][cols_feature]
-    y_train = df_train.iloc[folds[fold][0]][col_target]
-    x_valid = df_train.iloc[folds[fold][1]][cols_feature]
-    y_valid = df_train.iloc[folds[fold][1]][col_target]
-    x_test = df_test[cols_feature]
-
-    print(f'fold: {fold+1}, train: {len(x_train)}, valid: {len(x_valid)}')
-    train_data = lgb.Dataset(x_train, label=y_train, categorical_feature=cols_cat)
-    valid_data = lgb.Dataset(x_valid, label=y_valid, categorical_feature=cols_cat)
-
-    model = lgb.train(
-        params, # モデルのパラメータ
-        train_data, # 学習データ
-        1000, # 学習を繰り返す最大epoch数, epoch = モデルの学習回数
-        valid_sets=[train_data, valid_data], # 検証データ
-        verbose_eval=100, # 100 epoch ごとに経過を表示する
-        early_stopping_rounds=150, # 150epoch続けて検証データのロスが減らなかったら学習を中断する
-    )
-
-    preds_valid[folds[fold][1]] = model.predict(x_valid, num_iteration=model.best_iteration) # 検証データに対する予測を実行
-    preds_test[fold] = model.predict(x_test, num_iteration=model.best_iteration)  # テストデータに対する予測を実行
-
-    # 特徴量の重要度を記録
-    tmp = pd.DataFrame()
-    tmp['feature'] = cols_feature
-    tmp['importance'] = model.feature_importance()
-    tmp['fold'] = fold + 1
-    df_feature_importance = pd.concat([df_feature_importance, tmp], axis=0)
+        # classification_loss = classification_loss.mean()
+        # regression_loss = regression_loss.mean()
+        # loss = classification_loss + regression_loss
 
 
-score = metrics.roc_auc_score(df_train[col_target], preds_valid)
-print(f'CV AUC: {score:.6f}')
-
-df_tmp = df_feature_importance.groupby('feature').agg('mean').reset_index()
-df_tmp = df_tmp.sort_values('importance', ascending=False)
-print(df_tmp[['feature', 'importance']])
-df_tmp.to_csv('out/importance.csv')
-
-p = 'out/model.txt'
-model.save_model(p)
-print(f'wrote {p}')
+MyTrainer().run()
