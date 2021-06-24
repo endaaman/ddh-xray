@@ -69,8 +69,7 @@ class MyTrainer(Trainer):
             transforms.Normalize(*[[v] * 3 for v in train_dataset.get_mean_and_std()]),
         ])
         transform_y = transforms.Compose([
-            lambda aa: [[*a.rect, a.id] for a in aa],
-            lambda y: torch.tensor(y, dtype=torch.float),
+            lambda y: y.to_tensor(),
         ])
         train_dataset.set_transforms(transform_x, transform_y)
         if self.args.no_aug:
@@ -86,6 +85,32 @@ class MyTrainer(Trainer):
         )
         return train_loader, None
 
+    def train_epoch(self, model, loader, criterion, optimizer, get_message):
+        model.train()
+        metrics = {
+            'loss': [],
+        }
+        t = tqdm(loader, leave=False)
+        for (inputs, labels) in t:
+            inputs = inputs.to(self.device)
+            labels = labels.to(self.device)
+            classification, regression, anchors = model(inputs)
+            classification_loss, regression_loss = criterion(
+                classification, regression, anchors, labels, self.device)
+            loss = classification_loss.mean() + regression_loss.mean()
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+            iter_metrics = {
+                'loss': loss.item(),
+            }
+            message = ' '.join([f'{k}:{v:.4f}' for k, v in iter_metrics.items()])
+            t.set_description(get_message(message))
+            t.refresh()
+            metrics['loss'].append(loss.item())
+
+        return {k: np.mean(v) for k, v in metrics.items()}
+
     def do_train(self, model, starting_epoch):
         train_loader, __test_loader = self.create_loaders()
 
@@ -98,33 +123,13 @@ class MyTrainer(Trainer):
         print('Starting training')
         for epoch in range(starting_epoch, self.args.epoch + 1):
             header = f'[{epoch}/{self.args.epoch}] '
-            model.train()
+
             print(f'{header}Starting lr={optimizer.param_groups[0]["lr"]:.5f}')
-            losses = []
-            t = tqdm(train_loader, leave=False)
-            for (inputs, labels) in t:
-                inputs = inputs.to(self.device)
-                labels = labels.to(self.device)
-                classification, regression, anchors = model(inputs)
-                classification_loss, regression_loss = criterion(
-                    classification, regression, anchors, labels, self.device)
-                loss = classification_loss.mean() + regression_loss.mean()
-                loss.backward()
-                optimizer.step()
-                optimizer.zero_grad()
 
-                metrics = {
-                    'loss': loss.item(),
-                }
-                message = ' '.join([f'{k}:{v:.4f}' for k, v in metrics.items()])
-                t.set_description(f'{header}{message}')
-                t.refresh()
-                losses.append(loss.item())
-
-            train_loss = np.mean(losses)
-            train_metrics = {
-                'loss': train_loss,
-            }
+            train_metrics = self.train_epoch(
+                model, train_loader, criterion, optimizer,
+                lambda m: f'{header}{m}'
+            )
             train_message = ' '.join([f'{k}:{v:.4f}' for k, v in train_metrics.items()])
             print(f'{header}Train: {train_message}')
 
@@ -139,8 +144,7 @@ class MyTrainer(Trainer):
                 weights_path = self.save_state(model, epoch)
                 print(f'{header}Saved "{weights_path}"')
 
-            scheduler.step(train_loss)
-            print(f'{header}Done.')
+            scheduler.step(train_metrics['loss'])
             print()
 
     def arg_start(self, parser):

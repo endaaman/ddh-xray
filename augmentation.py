@@ -6,9 +6,10 @@ from typing import List
 import numpy as np
 import torch
 import torchvision
-from PIL import Image, ImageOps, ImageEnhance
+from PIL import Image, ImageDraw, ImageOps, ImageEnhance
 from matplotlib import pyplot as plt
 
+from datasets import XrayDataset
 from utils import Annotation, BBLabel, pil_to_tensor, tensor_to_pil
 
 
@@ -133,10 +134,9 @@ class Augmentation():
         new_size = int(IMAGE_SIZE * scale)
         img = img.resize((new_size, new_size))
 
-        # trim id
+        # extract rect
         rects = np.vstack([a.rect for a in label])
-        # convert to abs coord
-        abs_rects = rects * new_size
+        rects *= scale
 
         t = self.tile_size
         x_offset = np.random.randint(0, new_size - t + 1)
@@ -144,9 +144,7 @@ class Augmentation():
         # crop
         img = img.crop((x_offset, y_offset, x_offset + t, y_offset + t))
         # subtract offset in abs coord
-        abs_rects -= np.array([x_offset, y_offset, x_offset, y_offset])
-        # restore to relative coord
-        rects /= t
+        rects -= np.array([x_offset, y_offset, x_offset, y_offset])
         label = [Annotation(label[i].id, rect) for i, rect in enumerate(rects)]
         return img, label
 
@@ -171,7 +169,22 @@ class ResizeAugmentation():
         self.tile_size = tile_size
 
     def __call__(self, img: Image, label: BBLabel):
-        return img.resize((self.tile_size, self.tile_size)), label
+        scale = self.tile_size / IMAGE_SIZE
+        return img.resize((self.tile_size, self.tile_size)), [Annotation(a.id, a.rect *scale) for a in label]
 
 if __name__ == '__main__':
-    visualize_each_augmix()
+    ds = XrayDataset()
+    ds.set_augmentaion(Augmentation(tile_size=512))
+
+    for i, (image, label) in enumerate(ds):
+        draw = ImageDraw.Draw(image)
+
+        for a in label:
+            print(a)
+            x0, y0, x1, y1 = a.rect
+            draw.rectangle(((x0, y0), (x1, y1)), outline='yellow', width=1)
+        image.save(f'tmp/{i}.jpg')
+        if i > 2:
+            break
+
+

@@ -16,9 +16,15 @@ class Annotation(RecordClass):
     def copy(self):
         return Annotation(self.id, self.rect.copy())
 
+    def to_tensor(self):
+        return torch.tensor([*a.rect, a.id], dtype=torch.float)
+
 class BBLabel(List[Annotation]):
     def copy(self):
         return [a.copy() for a in self]
+
+    def to_tensor(self):
+        return torch.vstack([a.to_tensor() for a in self])
 
 def read_label(path):
     f = open(path, 'r')
@@ -28,12 +34,13 @@ def read_label(path):
         parted  = line.split(' ')
         id = int(parted[0])
         center_x, center_y, w, h = [float(v) for v in parted[1:]]
-        label.append(Annotation(id, np.array([
+        rect = np.array([
             center_x - w / 2,
-            center_x + w / 2,
             center_y - h / 2,
+            center_x + w / 2,
             center_y + h / 2,
-        ])))
+        ]) * IMAGE_SIZE
+        label.append(Annotation(id, rect))
     return label
 
 
@@ -72,4 +79,3 @@ def calc_mean_and_std(images):
     mean /= len(images)
     std /= len(images)
     return mean, std
-

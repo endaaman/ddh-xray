@@ -2,3 +2,4 @@ data
 results/
 weights/
 out/
+tmp/

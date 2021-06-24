@@ -17,7 +17,6 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 
 from utils import XrayBBItem, Annotation, BBLabel, calc_mean_and_std
-from augmentation import Augmentation
 
 
 class BaseDataset(Dataset):
@@ -74,7 +73,7 @@ class XrayDataset(BaseDataset):
 
         items = []
         image_paths = sorted(glob.glob(os.path.join(base_dir, 'image', '*.jpg')))
-        t = tqdm(image_paths)
+        t = tqdm(image_paths, leave=False)
         for image_path in t:
             if self.is_training:
                 file_name = os.path.basename(image_path)
