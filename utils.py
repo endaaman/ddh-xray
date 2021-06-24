@@ -7,11 +7,18 @@ from recordclass import recordclass, RecordClass
 
 
 
+IMAGE_SIZE = 624
+
 class Annotation(RecordClass):
     id: int
     rect: np.ndarray
 
-BBLabel = List[Annotation]
+    def copy(self):
+        return Annotation(self.id, self.rect.copy())
+
+class BBLabel(List[Annotation]):
+    def copy(self):
+        return [a.copy() for a in self]
 
 def read_label(path):
     f = open(path, 'r')
@@ -20,8 +27,13 @@ def read_label(path):
     for line in lines:
         parted  = line.split(' ')
         id = int(parted[0])
-        x, y, w, h = [float(v) for v in parted[1:]]
-        label.append(Annotation(id, np.array([x, y, x + w, y + h])))
+        center_x, center_y, w, h = [float(v) for v in parted[1:]]
+        label.append(Annotation(id, np.array([
+            center_x - w / 2,
+            center_x + w / 2,
+            center_y - h / 2,
+            center_y + h / 2,
+        ])))
     return label
 
 
@@ -30,7 +42,13 @@ class XrayBBItem:
         self.image_path = image_path
         self.label_path = label_path
         self.image = Image.open(self.image_path)
+        if self.image.width != IMAGE_SIZE or self.image.height != IMAGE_SIZE:
+            raise Exception(f'invalid size! {image_path}: {self.image.width} {self.image.height}')
         if label_path:
+            self.label = read_label(self.label_path)
+            if len(self.label) != 6:
+                raise Exception('Invalid annotation: ', label_path)
+        else:
             self.label = read_label(self.label_path)
 
 

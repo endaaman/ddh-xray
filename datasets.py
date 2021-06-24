@@ -96,27 +96,25 @@ class XrayDataset(BaseDataset):
         x = item.image
         y = item.label
         if self.augmentation:
-            x, y = self.augmentation(x, y)
+            x, y = self.augmentation(x, y.copy())
         return self.transform(x, y)
 
 
 if __name__ == '__main__':
     ds = XrayDataset()
 
-    transform_x = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-    ])
-    transform_y = transforms.Compose([
-        lambda aa: [[a.id, *a.rect] for a in aa],
-        lambda y: torch.tensor(y, dtype=torch.float),
-    ])
-    ds.set_transforms(transform_x, transform_y)
-
-    ds.set_augmentaion(Augmentation())
+    # transform_x = transforms.Compose([
+    #     transforms.ToTensor(),
+    #     transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+    # ])
+    # transform_y = transforms.Compose([
+    #     lambda aa: [[a.id, *a.rect] for a in aa],
+    #     lambda y: torch.tensor(y, dtype=torch.float),
+    # ])
+    # ds.set_transforms(transform_x, transform_y)
+    # ds.set_augmentaion(Augmentation())
 
 
     for (x, y) in ds:
-        # print(x)
-        print(y[0])
-        break
+        print(x.width, x.height)
+        # print(y[0])
