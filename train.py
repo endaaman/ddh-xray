@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 from effdet import EfficientDet, FocalLoss, EFFDET_PARAMS
 from augmentation import Augmentation, ResizeAugmentation
 from datasets import XrayDataset
+from utils import label_to_tensor
 from endaaman import Trainer
 
 
@@ -36,6 +37,7 @@ class MyTrainer(Trainer):
         parser.add_argument('-e', '--epoch', type=int, default=50)
         parser.add_argument('-n', '--num-workers', type=int, default=os.cpu_count()//2)
         parser.add_argument('-b', '--batch-size', type=int, default=48)
+        parser.add_argument('-t', '--tile', type=int, default=512)
         parser.add_argument('--lr', type=float, default=0.0001)
         parser.add_argument('--no-aug', action='store_true')
         parser.add_argument('--network', default='d0', type=str, help='efficientdet-[d0, d1, ..]')
@@ -69,13 +71,13 @@ class MyTrainer(Trainer):
             transforms.Normalize(*[[v] * 3 for v in train_dataset.get_mean_and_std()]),
         ])
         transform_y = transforms.Compose([
-            lambda y: y.to_tensor(),
+            lambda y: label_to_tensor(y),
         ])
         train_dataset.set_transforms(transform_x, transform_y)
         if self.args.no_aug:
-            aug = ResizeAugmentation(tile_size=512)
+            aug = ResizeAugmentation(tile_size=self.args.tile)
         else:
-            aug = Augmentation(tile_size=512)
+            aug = Augmentation(tile_size=self.args.tile)
         train_dataset.set_augmentaion(aug)
 
         train_loader = DataLoader(
@@ -86,7 +88,7 @@ class MyTrainer(Trainer):
         return train_loader, None
 
     def train_epoch(self, model, loader, criterion, optimizer, get_message):
-        model.train()
+        model = model.train()
         metrics = {
             'loss': [],
         }
@@ -94,20 +96,21 @@ class MyTrainer(Trainer):
         for (inputs, labels) in t:
             inputs = inputs.to(self.device)
             labels = labels.to(self.device)
+            optimizer.zero_grad()
             classification, regression, anchors = model(inputs)
             classification_loss, regression_loss = criterion(
                 classification, regression, anchors, labels, self.device)
             loss = classification_loss.mean() + regression_loss.mean()
             loss.backward()
             optimizer.step()
-            optimizer.zero_grad()
             iter_metrics = {
-                'loss': loss.item(),
+                'loss': float(loss.item()),
             }
             message = ' '.join([f'{k}:{v:.4f}' for k, v in iter_metrics.items()])
             t.set_description(get_message(message))
             t.refresh()
-            metrics['loss'].append(loss.item())
+            for k, v in iter_metrics.items():
+                metrics[k].append(v)
 
         return {k: np.mean(v) for k, v in metrics.items()}
 
@@ -115,8 +118,9 @@ class MyTrainer(Trainer):
         train_loader, __test_loader = self.create_loaders()
 
         criterion = FocalLoss()
-        optimizer = optim.AdamW(model.parameters(), lr=self.args.lr)
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3, verbose=True)
+        optimizer = optim.Adam(model.parameters(), lr=self.args.lr)
+        # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3, verbose=True)
+        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda x: 0.95 ** x)
 
         model.train()
         model.freeze_bn()
@@ -124,7 +128,9 @@ class MyTrainer(Trainer):
         for epoch in range(starting_epoch, self.args.epoch + 1):
             header = f'[{epoch}/{self.args.epoch}] '
 
-            print(f'{header}Starting lr={optimizer.param_groups[0]["lr"]:.5f}')
+            lr = scheduler.get_last_lr()[0]
+            # lr = optimizer.param_groups[0]["lr"]
+            print(f'{header}Starting lr={lr:.7f}')
 
             train_metrics = self.train_epoch(
                 model, train_loader, criterion, optimizer,
@@ -144,7 +150,8 @@ class MyTrainer(Trainer):
                 weights_path = self.save_state(model, epoch)
                 print(f'{header}Saved "{weights_path}"')
 
-            scheduler.step(train_metrics['loss'])
+            # scheduler.step(train_metrics['loss'])
+            scheduler.step()
             print()
 
     def arg_start(self, parser):

@@ -1,12 +1,15 @@
+import math
 import torch
 import torch.nn as nn
-import math
+from torchvision.ops import nms
+
 from .efficientnet import EfficientNet
 from .bifpn import BIFPN
 from .retinahead import RetinaHead
 from .module import RegressionModel, ClassificationModel, Anchors, ClipBoxes, BBoxTransform
-from torchvision.ops import nms
 from .losses import FocalLoss
+
+
 MODEL_MAP = {
     'efficientdet-d0': 'efficientnet-b0',
     'efficientdet-d1': 'efficientnet-b1',
@@ -26,12 +29,10 @@ class EfficientDet(nn.Module):
                  D_bifpn=3,
                  W_bifpn=88,
                  D_class=3,
-                 is_training=True,
                  threshold=0.01,
                  iou_threshold=0.5):
         super(EfficientDet, self).__init__()
         self.backbone = EfficientNet.from_pretrained(MODEL_MAP[network])
-        self.is_training = is_training
         self.neck = BIFPN(in_channels=self.backbone.get_list_features()[-5:],
                           out_channels=W_bifpn,
                           stack=D_bifpn,
@@ -40,8 +41,8 @@ class EfficientDet(nn.Module):
                                     in_channels=W_bifpn)
 
         self.anchors = Anchors()
-        self.regressBoxes = BBoxTransform()
-        self.clipBoxes = ClipBoxes()
+        self.regress_boxes = BBoxTransform()
+        self.clip_boxes = ClipBoxes()
         self.threshold = threshold
         self.iou_threshold = iou_threshold
         for m in self.modules():
@@ -63,8 +64,8 @@ class EfficientDet(nn.Module):
 
     def infer(self, inputs):
         classification, regression, anchors = self(inputs)
-        transformed_anchors = self.regressBoxes(anchors, regression)
-        transformed_anchors = self.clipBoxes(transformed_anchors, inputs)
+        transformed_anchors = self.regress_boxes(anchors, regression)
+        transformed_anchors = self.clip_boxes(transformed_anchors, inputs)
         scores = torch.max(classification, dim=2, keepdim=True)[0]
         scores_over_thresh = (scores > self.threshold)[0, :, 0]
 

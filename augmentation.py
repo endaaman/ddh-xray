@@ -3,14 +3,16 @@ import random
 import enum
 from typing import List
 
+from tqdm import tqdm
 import numpy as np
+import pandas as pd
 import torch
 import torchvision
 from PIL import Image, ImageDraw, ImageOps, ImageEnhance
 from matplotlib import pyplot as plt
 
 from datasets import XrayDataset
-from utils import Annotation, BBLabel, pil_to_tensor, tensor_to_pil
+from utils import pil_to_tensor, tensor_to_pil
 
 
 IMAGE_SIZE = 624
@@ -25,7 +27,7 @@ class Augmentation():
     def __init__(self,
                  tile_size=512,
                  ways=3,
-                 level_range=(0.2, 0.8),
+                 level_range=(0.2, 0.5),
                  scale_range=(0.875, 1.25)):
         self.tile_size = tile_size
         self.ways = ways
@@ -127,28 +129,25 @@ class Augmentation():
     def aug_multi(self, imgs, name=None, level=None):
         return [self.aug(img, name, level) for img in imgs]
 
-    def resize_and_crop(self, img: Image, label: BBLabel):
+    def resize_and_crop(self, img: Image, label: pd.DataFrame):
         min_scale = self.scale_range[0]
         max_scale = self.scale_range[1]
         scale = np.random.rand() * (max_scale - min_scale) + min_scale
         new_size = int(IMAGE_SIZE * scale)
         img = img.resize((new_size, new_size))
 
-        # extract rect
-        rects = np.vstack([a.rect for a in label])
-        rects *= scale
+        label.iloc[:, :4] *= scale
 
         t = self.tile_size
         x_offset = np.random.randint(0, new_size - t + 1)
         y_offset = np.random.randint(0, new_size - t + 1)
         # crop
         img = img.crop((x_offset, y_offset, x_offset + t, y_offset + t))
-        # subtract offset in abs coord
-        rects -= np.array([x_offset, y_offset, x_offset, y_offset])
-        label = [Annotation(label[i].id, rect) for i, rect in enumerate(rects)]
+        # subtract offset
+        label.iloc[:, :4] -= np.array([x_offset, y_offset, x_offset, y_offset])
         return img, label
 
-    def multi_way_aug(self, img: Image, label: BBLabel, level=None):
+    def multi_way_aug(self, img: Image, level=None):
         ws = np.random.dirichlet([1] * self.ways).astype(np.float32)
         tensors = []
         for i in range(self.ways):
@@ -158,33 +157,43 @@ class Augmentation():
             tensors.append(tensor * ws[i])
         tensors = torch.stack(tensors)
         mixed = torch.sum(tensors, axis=0)
-        return tensor_to_pil(mixed), label
+        return tensor_to_pil(mixed)
 
-    def __call__(self, img: Image, label: BBLabel, level=None):
+    def __call__(self, img: Image, label: pd.DataFrame, level=None):
         img, label = self.resize_and_crop(img, label)
-        return self.multi_way_aug(img, label)
+        return self.multi_way_aug(img), label
 
 class ResizeAugmentation():
     def __init__(self, tile_size):
         self.tile_size = tile_size
 
-    def __call__(self, img: Image, label: BBLabel):
+    def __call__(self, img: Image, label: pd.DataFrame):
         scale = self.tile_size / IMAGE_SIZE
-        return img.resize((self.tile_size, self.tile_size)), [Annotation(a.id, a.rect *scale) for a in label]
+        label.iloc[:, :4] *= scale
+        return img.resize((self.tile_size, self.tile_size)), label
 
 if __name__ == '__main__':
     ds = XrayDataset()
-    ds.set_augmentaion(Augmentation(tile_size=512))
+    ds.set_augmentaion(Augmentation(tile_size=512, level_range=(0.2, 0.5)))
 
     for i, (image, label) in enumerate(ds):
         draw = ImageDraw.Draw(image)
 
-        for a in label:
-            print(a)
-            x0, y0, x1, y1 = a.rect
+        for _i, row in label.iterrows():
+            x0, y0, x1, y1, id = row
+            if id < 0 or id > 5:
+                print(i, 'id', id)
+                print(ds.items[i].image_path)
+
+            # if x0 < 0:
+            #     print(i, 'x0', x0)
+            # if y0 < 0:
+            #     print(i, 'y0', y0)
+            # if x1 > IMAGE_SIZE:
+            #     print(i, 'x1', x1)
+            # if y1 > IMAGE_SIZE:
+            #     print(i, 'y1', y1)
             draw.rectangle(((x0, y0), (x1, y1)), outline='yellow', width=1)
-        image.save(f'tmp/{i}.jpg')
-        if i > 2:
-            break
-
-
+        # image.save(f'tmp/{i}.jpg')
+        # if i > 2:
+        #     break

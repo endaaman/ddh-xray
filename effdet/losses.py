@@ -112,10 +112,8 @@ class FocalLoss(nn.Module):
                 anchor_ctr_x_pi = anchor_ctr_x[positive_indices]
                 anchor_ctr_y_pi = anchor_ctr_y[positive_indices]
 
-                gt_widths = assigned_annotations[:,
-                                                 2] - assigned_annotations[:, 0]
-                gt_heights = assigned_annotations[:,
-                                                  3] - assigned_annotations[:, 1]
+                gt_widths = assigned_annotations[:, 2] - assigned_annotations[:, 0]
+                gt_heights = assigned_annotations[:, 3] - assigned_annotations[:, 1]
                 gt_ctr_x = assigned_annotations[:, 0] + 0.5 * gt_widths
                 gt_ctr_y = assigned_annotations[:, 1] + 0.5 * gt_heights
 

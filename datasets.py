@@ -16,7 +16,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 
-from utils import XrayBBItem, Annotation, BBLabel, calc_mean_and_std
+from utils import XrayBBItem, calc_mean_and_std, label_to_tensor
 
 
 class BaseDataset(Dataset):
@@ -92,28 +92,26 @@ class XrayDataset(BaseDataset):
 
     def __getitem__(self, idx):
         item = self.items[idx]
-        x = item.image
-        y = item.label
+        x = item.image.copy()
+        y = item.label.copy()
         if self.augmentation:
-            x, y = self.augmentation(x, y.copy())
+            x, y = self.augmentation(x, y)
         return self.transform(x, y)
 
 
 if __name__ == '__main__':
+    from augmentation import Augmentation, ResizeAugmentation
     ds = XrayDataset()
 
-    # transform_x = transforms.Compose([
-    #     transforms.ToTensor(),
-    #     transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-    # ])
-    # transform_y = transforms.Compose([
-    #     lambda aa: [[a.id, *a.rect] for a in aa],
-    #     lambda y: torch.tensor(y, dtype=torch.float),
-    # ])
-    # ds.set_transforms(transform_x, transform_y)
+    t_x = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+    ])
+    t_y = lambda y: label_to_tensor(y)
+    ds.set_transforms(t_x, t_y)
     # ds.set_augmentaion(Augmentation())
 
-
     for (x, y) in ds:
-        print(x.width, x.height)
-        # print(y[0])
+        print(x.shape, y.shape)
+        print(x.dtype)
+        break
