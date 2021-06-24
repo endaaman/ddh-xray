@@ -16,13 +16,8 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 
-from utils import Annotation
+from utils import XrayBBItem, Annotation, BBLabel, calc_mean_and_std
 from augmentation import Augmentation
-
-
-class Item(RecordClass):
-    image: object # Image
-    annots: Annotation
 
 
 class BaseDataset(Dataset):
@@ -61,22 +56,15 @@ class BaseDataset(Dataset):
     def __getitem__(self, idx):
         pass
 
-def read_annotation(path):
-    f = open(path, 'r')
-    lines = f.readlines()
-    annot = []
-    for line in lines:
-        parted  = line.split(' ')
-        id = int(parted[0])
-        x, y, w, h = [float(v) for v in parted[1:]]
-        annot.append(Annotation(id, np.array([x, y, x + w, y + h])))
-    return annot
 
 class XrayDataset(BaseDataset):
     def __init__(self, is_training=True, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.is_training = is_training
         self.items = self.load_items()
+
+    def get_mean_and_std(self):
+        return calc_mean_and_std([item.image for item in self.items])
 
     def load_items(self):
         if self.is_training:
@@ -85,21 +73,19 @@ class XrayDataset(BaseDataset):
             base_dir = 'data/yolo/test'
 
         items = []
-        paths = sorted(glob.glob(os.path.join(base_dir, 'image', '*.jpg')))
-        # t = tqdm(paths)
-        for path in paths:
-            img = Image.open(path)
+        image_paths = sorted(glob.glob(os.path.join(base_dir, 'image', '*.jpg')))
+        t = tqdm(image_paths)
+        for image_path in t:
             if self.is_training:
-                file_name = os.path.basename(path)
+                file_name = os.path.basename(image_path)
                 base_name = os.path.splitext(file_name)[0]
-                annot_path = os.path.join(base_dir, 'label', f'{base_name}.txt')
-                annot = read_annotation(annot_path)
+                label_path = os.path.join(base_dir, 'label', f'{base_name}.txt')
             else:
-                annot = None
-            items.append(Item(img, annot))
-            # t.set_description(f'loaded {path}')
-            # t.refresh()
-
+                label_path = None
+            items.append(XrayBBItem(image_path, label_path))
+            t.set_description(f'loaded {image_path}')
+            t.refresh()
+        print('All images loaded')
         return items
 
     def __len__(self):
@@ -108,10 +94,9 @@ class XrayDataset(BaseDataset):
     def __getitem__(self, idx):
         item = self.items[idx]
         x = item.image
-        y = item.annots
+        y = item.label
         if self.augmentation:
             x, y = self.augmentation(x, y)
-        print(y[0])
         return self.transform(x, y)
 
 

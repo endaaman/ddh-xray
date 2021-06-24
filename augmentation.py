@@ -9,7 +9,7 @@ import torchvision
 from PIL import Image, ImageOps, ImageEnhance
 from matplotlib import pyplot as plt
 
-from utils import Annotation, pil_to_tensor, tensor_to_pil
+from utils import Annotation, BBLabel, pil_to_tensor, tensor_to_pil
 
 IMAGE_SIZE = 256
 
@@ -19,7 +19,7 @@ def float_level(level, maxval):
 def int_level(level, maxval):
     return int(level * maxval)
 
-class Augmentation():
+class BaseAugmentation():
     def __init__(self,
                  tile_size=512,
                  ways=3,
@@ -125,7 +125,7 @@ class Augmentation():
     def aug_multi(self, imgs, name=None, level=None):
         return [self.aug(img, name, level) for img in imgs]
 
-    def resize_and_crop(self, img: Image, annots: List[Annotation]):
+    def resize_and_crop(self, img: Image, label: BBLabel):
         base_w = img.width
         base_h = img.height
 
@@ -137,7 +137,7 @@ class Augmentation():
         img = img.resize((new_w, new_h))
 
         # trim id
-        rects = np.vstack([a.rect for a in annots])
+        rects = np.vstack([a.rect for a in label])
         rects *= scale
 
         t = self.tile_size
@@ -151,11 +151,10 @@ class Augmentation():
         bb_y_offset = y_offset / new_h
         rects -= np.array([bb_x_offset, bb_y_offset, bb_x_offset, bb_y_offset])
 
-        annots = [Annotation(annots[i].id, rect) for i, rect in enumerate(rects)]
-        return img, annots
+        label = [Annotation(label[i].id, rect) for i, rect in enumerate(rects)]
+        return img, label
 
-    def __call__(self, img: Image, annots: List[Annotation], level=None):
-        img, annots = self.resize_and_crop(img, annots)
+    def multi_way_aug(self, img: Image, label: BBLabel, level=None):
         ws = np.random.dirichlet([1] * self.ways).astype(np.float32)
         tensors = []
         for i in range(self.ways):
@@ -165,10 +164,18 @@ class Augmentation():
             tensors.append(tensor * ws[i])
         tensors = torch.stack(tensors)
         mixed = torch.sum(tensors, axis=0)
-        return tensor_to_pil(mixed), annots
+        return tensor_to_pil(mixed), label
 
-    def multi(self, imgs, level=None):
-        return [self(img, level=None) for img in imgs]
+
+class PlaneAugmentation(BaseAugmentation):
+    def __call__(self, img: Image, label: BBLabel, level=None):
+        return self.resize_and_crop(img, label)
+
+class Augmentation(BaseAugmentation):
+    def __call__(self, img: Image, label: BBLabel, level=None):
+        img, label = self.resize_and_crop(img, label)
+        return self.multi_way_aug(img, label)
+
 
 
 if __name__ == '__main__':

@@ -85,10 +85,19 @@ class EfficientDet(nn.Module):
     #     return criterion(classification, regression, anchors, annotations)
 
     def freeze_bn(self):
-        '''Freeze BatchNorm layers.'''
-        for layer in self.modules():
+        if type(self) == torch.nn.DataParallel:
+            target = self.module
+        else:
+            target = self
+        for layer in target.modules():
             if isinstance(layer, nn.BatchNorm2d):
                 layer.eval()
+
+    def get_state_dict(self):
+        if type(self) == torch.nn.DataParallel:
+            return self.module.state_dict()
+        else:
+            return self.state_dict()
 
     def extract_feat(self, img):
         """
