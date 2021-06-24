@@ -46,7 +46,9 @@ class MyTrainer(Trainer):
             'args': self.args,
             'state_dict': model.get_state_dict(),
         }
-        weights_path = f'weights/{epoch}.pth'
+        weights_dir = f'weights/{self.args.network}'
+        os.makedirs(weights_dir, exist_ok=True)
+        weights_path = os.path.join(weights_dir, f'{epoch}.pth')
         torch.save(state, weights_path)
         return weights_path
 
@@ -58,7 +60,7 @@ class MyTrainer(Trainer):
             W_bifpn=EFFDET_PARAMS[network]['W_bifpn'],
             D_bifpn=EFFDET_PARAMS[network]['D_bifpn'],
             D_class=EFFDET_PARAMS[network]['D_class'])
-        return model
+        return model.to(self.device)
 
     def create_loaders(self):
         train_dataset = XrayDataset()
@@ -67,7 +69,7 @@ class MyTrainer(Trainer):
             transforms.Normalize(*[[v] * 3 for v in train_dataset.get_mean_and_std()]),
         ])
         transform_y = transforms.Compose([
-            lambda aa: [[a.id, *a.rect] for a in aa],
+            lambda aa: [[*a.rect, a.id] for a in aa],
             lambda y: torch.tensor(y, dtype=torch.float),
         ])
         train_dataset.set_transforms(transform_x, transform_y)
@@ -97,9 +99,9 @@ class MyTrainer(Trainer):
         for epoch in range(starting_epoch, self.args.epoch + 1):
             header = f'[{epoch}/{self.args.epoch}] '
             model.train()
-            t = tqdm(train_loader)
             print(f'{header}Starting lr={optimizer.param_groups[0]["lr"]:.5f}')
-            epoch_loss = []
+            losses = []
+            t = tqdm(train_loader, leave=False)
             for (inputs, labels) in t:
                 inputs = inputs.to(self.device)
                 labels = labels.to(self.device)
@@ -115,9 +117,16 @@ class MyTrainer(Trainer):
                     'loss': loss.item(),
                 }
                 message = ' '.join([f'{k}:{v:.4f}' for k, v in metrics.items()])
-                t.set_description(message)
+                t.set_description(f'{header}{message}')
                 t.refresh()
-                epoch_loss.append(loss.item())
+                losses.append(loss.item())
+
+            train_loss = np.mean(losses)
+            train_metrics = {
+                'loss': train_loss,
+            }
+            train_message = ' '.join([f'{k}:{v:.4f}' for k, v in train_metrics.items()])
+            print(f'{header}Train: {train_message}')
 
             #* validate
 
@@ -126,11 +135,13 @@ class MyTrainer(Trainer):
                 pass
 
             #* save weights
-            if epoch % 1 == 0:
+            if epoch % 10 == 0:
                 weights_path = self.save_state(model, epoch)
                 print(f'{header}Saved "{weights_path}"')
-            scheduler.step(np.mean(epoch_loss))
+
+            scheduler.step(train_loss)
             print(f'{header}Done.')
+            print()
 
     def arg_start(self, parser):
         pass

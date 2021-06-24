@@ -12,6 +12,8 @@ from matplotlib import pyplot as plt
 from utils import Annotation, BBLabel, pil_to_tensor, tensor_to_pil
 
 
+IMAGE_SIZE = 624
+
 def float_level(level, maxval):
     return level * maxval
 
@@ -134,7 +136,7 @@ class Augmentation():
         # trim id
         rects = np.vstack([a.rect for a in label])
         # convert to abs coord
-        abs_rects *= new_size
+        abs_rects = rects * new_size
 
         t = self.tile_size
         x_offset = np.random.randint(0, new_size - t + 1)
