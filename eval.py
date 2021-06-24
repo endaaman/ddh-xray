@@ -31,6 +31,7 @@ class MyEval(Trainer):
         parser.add_argument('-w', '--weights', type=str, required=True)
         parser.add_argument('-s', '--src', type=str, required=True)
         parser.add_argument('-d', '--dest', type=str, default='out')
+        parser.add_argument('-o', '--open', action='store_true')
 
     def run_single(self):
         state = torch.load(self.args.weights, map_location=lambda storage, loc: storage)
@@ -64,9 +65,9 @@ class MyEval(Trainer):
 
             clas = int(classification[[j]])
             score = np.around(scores[[j]].cpu().numpy(), decimals=2) * 100
-            if score > 50:
-                draw.rectangle(((bbox[0], bbox[1]), (bbox[2], bbox[3])), outline='yellow', width=1)
-            print(score, clas, bbox)
+            draw.rectangle(((bbox[0], bbox[1]), (bbox[2], bbox[3])), outline='yellow', width=1)
+            if score > 30:
+                print(score, clas, bbox)
             # labelSize, baseLine = cv2.getTextSize('{} {}'.format(
             #     label_name, int(score)), cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
             # cv2.rectangle(
@@ -85,6 +86,8 @@ class MyEval(Trainer):
         dest_path = os.path.join(dest_dir, file_name)
         img.save(dest_path)
         print(f'saved {dest_path}')
+        if self.args.open:
+            os.system(f'xdg-open {dest_path}')
 
 
 MyEval().run()
