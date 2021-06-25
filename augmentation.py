@@ -170,11 +170,25 @@ class ResizeAugmentation():
     def __call__(self, img: Image, label: pd.DataFrame):
         scale = self.tile_size / IMAGE_SIZE
         label.iloc[:, :4] *= scale
-        return img.resize((self.tile_size, self.tile_size)), label
+        img = img.resize((self.tile_size, self.tile_size))
+        return img, label
+
+class CropAugmentation():
+    def __init__(self, tile_size):
+        self.tile_size = tile_size
+
+    def __call__(self, img: Image, label: pd.DataFrame):
+        t = self.tile_size
+        x_offset = (img.width - t) // 2
+        y_offset = (img.height - t) // 2
+        img = img.crop((x_offset, y_offset, x_offset + t, y_offset + t))
+        label.iloc[:, :4] -= np.array([x_offset, y_offset, x_offset, y_offset])
+        return img, label
 
 if __name__ == '__main__':
     ds = XrayDataset()
-    ds.set_augmentaion(Augmentation(tile_size=512, level_range=(0.2, 0.5)))
+    ds.set_augmentaion(Augmentation(tile_size=512, level_range=(0.2, 0.5), scale_range=(1.0, 1.2)))
+    # ds.set_augmentaion(CropAugmentation(tile_size=512))
 
     for i, (image, label) in enumerate(ds):
         draw = ImageDraw.Draw(image)
@@ -184,7 +198,6 @@ if __name__ == '__main__':
             if id < 0 or id > 5:
                 print(i, 'id', id)
                 print(ds.items[i].image_path)
-
             # if x0 < 0:
             #     print(i, 'x0', x0)
             # if y0 < 0:
@@ -194,6 +207,7 @@ if __name__ == '__main__':
             # if y1 > IMAGE_SIZE:
             #     print(i, 'y1', y1)
             draw.rectangle(((x0, y0), (x1, y1)), outline='yellow', width=1)
-        # image.save(f'tmp/{i}.jpg')
-        # if i > 2:
-        #     break
+
+        image.save(f'tmp/{i}.jpg')
+        if i > 5:
+            break

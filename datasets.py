@@ -111,7 +111,10 @@ if __name__ == '__main__':
     ds.set_transforms(t_x, t_y)
     # ds.set_augmentaion(Augmentation())
 
+
+    loader = DataLoader(ds, batch_size=3, num_workers=1)
+
     for (x, y) in ds:
-        print(x.shape, y.shape)
-        print(x.dtype)
+        print(y)
+        print(y.shape)
         break
