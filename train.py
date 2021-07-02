@@ -13,15 +13,21 @@ from torch.utils.data import DataLoader
 from effdet import EfficientDet, DetBenchTrain, get_efficientdet_config
 from augmentation import Augmentation, ResizeAugmentation
 from datasets import XrayDataset
-from utils import label_to_tensor
 from endaaman import Trainer
+
+
+def label_to_tensor(label, device):
+    # return torch.from_numpy(label.values).type(torch.FloatTensor)
+    return {
+        'bbox': torch.FloatTensor(label.values[:, :4]),
+        'cls': torch.FloatTensor(label.values[:, 4]),
+    }
 
 
 class MyTrainer(Trainer):
     def run_check(self):
         # model = self.create_model(self.args.network)
         cfg = get_efficientdet_config('tf_efficientdet_d1')
-        print(cfg.num_classes)
         model = EfficientDet(cfg)
         bench = DetBenchTrain(model)
 
@@ -53,6 +59,7 @@ class MyTrainer(Trainer):
                 ],
             ),
         }
+        print(targets['bbox'].shape)
         loss = bench(images, targets)
         # criterion = FocalLoss()
         # classification, regression, anchors = model(images)
@@ -85,14 +92,10 @@ class MyTrainer(Trainer):
         return weights_path
 
     def create_model(self, network):
-        network = f'efficientdet-{network}'
-        model = EfficientDet(
-            num_classes=6,
-            network=network,
-            W_bifpn=EFFDET_PARAMS[network]['W_bifpn'],
-            D_bifpn=EFFDET_PARAMS[network]['D_bifpn'],
-            D_class=EFFDET_PARAMS[network]['D_class'])
-        return model.to(self.device)
+        cfg = get_efficientdet_config(f'tf_efficientdet_{network}')
+        cfg.num_classes = 6
+        model = EfficientDet(cfg)
+        return model
 
     def create_loaders(self):
         train_dataset = XrayDataset()
@@ -101,7 +104,7 @@ class MyTrainer(Trainer):
             transforms.Normalize(*[[v] * 3 for v in train_dataset.get_mean_and_std()]),
         ])
         transform_y = transforms.Compose([
-            lambda y: label_to_tensor(y),
+            lambda y: label_to_tensor(y, self.device),
         ])
         train_dataset.set_transforms(transform_x, transform_y)
         if self.args.no_aug:
@@ -117,20 +120,19 @@ class MyTrainer(Trainer):
         )
         return train_loader, None
 
-    def train_epoch(self, model, loader, criterion, optimizer, get_message):
-        model = model.train()
+    def train_epoch(self, bench, loader, optimizer, get_message):
         metrics = {
             'loss': [],
         }
         t = tqdm(loader, leave=False)
-        for (inputs, labels) in t:
+        for (inputs, targets) in t:
             inputs = inputs.to(self.device)
-            labels = labels.to(self.device)
+            targets['bbox'] = targets['bbox'].to(self.device)
+            targets['cls'] = targets['cls'].to(self.device)
             optimizer.zero_grad()
-            classification, regression, anchors = model(inputs)
-            classification_loss, regression_loss = criterion(
-                classification, regression, anchors, labels, self.device)
-            loss = classification_loss.mean() + regression_loss.mean()
+            losses = bench(inputs, targets)
+
+            loss = losses['loss']
             loss.backward()
             optimizer.step()
             iter_metrics = {
@@ -147,13 +149,11 @@ class MyTrainer(Trainer):
     def do_train(self, model, starting_epoch):
         train_loader, __test_loader = self.create_loaders()
 
-        criterion = FocalLoss()
+        bench = DetBenchTrain(model).to(self.device)
         optimizer = optim.Adam(model.parameters(), lr=self.args.lr)
         # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3, verbose=True)
         scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda x: 0.95 ** x)
 
-        model.train()
-        model.freeze_bn()
         print('Starting training')
         for epoch in range(starting_epoch, self.args.epoch + 1):
             header = f'[{epoch}/{self.args.epoch}] '
@@ -163,7 +163,7 @@ class MyTrainer(Trainer):
             print(f'{header}Starting lr={lr:.7f}')
 
             train_metrics = self.train_epoch(
-                model, train_loader, criterion, optimizer,
+                bench, train_loader, optimizer,
                 lambda m: f'{header}{m}'
             )
             train_message = ' '.join([f'{k}:{v:.4f}' for k, v in train_metrics.items()])
