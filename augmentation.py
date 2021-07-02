@@ -187,7 +187,7 @@ class CropAugmentation():
 
 if __name__ == '__main__':
     ds = XrayDataset()
-    ds.set_augmentaion(Augmentation(tile_size=512, level_range=(0.2, 0.5), scale_range=(1.0, 1.2)))
+    ds.set_augmentaion(Augmentation(tile_size=512, level_range=(0.0, 0.2), scale_range=(1.0, 1.2)))
     # ds.set_augmentaion(CropAugmentation(tile_size=512))
 
     for i, (image, label) in enumerate(ds):

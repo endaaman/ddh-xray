@@ -9,7 +9,8 @@ import torch.optim as optim
 from torchvision import transforms
 from torch.utils.data import DataLoader
 
-from effdet import EfficientDet, FocalLoss, EFFDET_PARAMS
+# from effdet import EfficientDet, FocalLoss, EFFDET_PARAMS
+from effdet import EfficientDet, DetBenchTrain, get_efficientdet_config
 from augmentation import Augmentation, ResizeAugmentation
 from datasets import XrayDataset
 from utils import label_to_tensor
@@ -18,20 +19,49 @@ from endaaman import Trainer
 
 class MyTrainer(Trainer):
     def run_check(self):
-        model = self.create_model(self.args.network)
+        # model = self.create_model(self.args.network)
+        cfg = get_efficientdet_config('tf_efficientdet_d1')
+        print(cfg.num_classes)
+        model = EfficientDet(cfg)
+        bench = DetBenchTrain(model)
 
         images = torch.randn(2, 3, 640, 640)
-        labels = torch.ones(2, 2, 5, dtype=torch.float)
-        print(images.shape)
-        print(labels.shape)
-        criterion = FocalLoss()
-        classification, regression, anchors = model(images)
-        print('anchors shape:', anchors.shape)
-        print('classification shape:', classification.shape)
-        print('regression shape:', regression.shape)
-        classification_loss, regression_loss = criterion(classification, regression, anchors, labels, 'cpu')
-        print(classification_loss)
-        print(regression_loss)
+        # labels = torch.ones(2, 2, 5, dtype=torch.float)
+        targets = {
+            'bbox': torch.FloatTensor(
+                [
+                    [
+                        [0, 0, 20, 30],
+                        [0, 0, 20, 30],
+                    ],
+                    [
+                        [0, 0, 20, 30],
+                        [0, 0, 20, 30],
+                    ]
+                ]
+            ),
+            'cls': torch.LongTensor(
+                [
+                    [
+                        1,
+                        2
+                    ],
+                    [
+                        1,
+                        2
+                    ]
+                ],
+            ),
+        }
+        loss = bench(images, targets)
+        # criterion = FocalLoss()
+        # classification, regression, anchors = model(images)
+        # print('anchors shape:', anchors.shape)
+        # print('classification shape:', classification.shape)
+        # print('regression shape:', regression.shape)
+        # classification_loss, regression_loss = criterion(classification, regression, anchors, labels, 'cpu')
+        # print(classification_loss)
+        # print(regression_loss)
 
     def arg_common(self, parser):
         parser.add_argument('-e', '--epoch', type=int, default=50)
