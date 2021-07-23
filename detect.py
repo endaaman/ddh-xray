@@ -11,8 +11,9 @@ from torch.utils.data import DataLoader
 
 # from effdet import EfficientDet, FocalLoss, EFFDET_PARAMS
 from effdet import EfficientDet, DetBenchTrain, get_efficientdet_config
-from augmentation import Augmentation, ResizeAugmentation
+from augmentation import Augmentation, ResizeAugmentation, CropAugmentation
 from datasets import XrayDataset
+from utils import get_state_dict
 from endaaman import Trainer
 
 
@@ -23,11 +24,15 @@ def label_to_tensor(label, device):
         'cls': torch.FloatTensor(label.values[:, 4]),
     }
 
+SIZE_BY_NETWORK= {
+    'd0': 512,
+    'd1': 640,
+}
 
 class MyTrainer(Trainer):
     def run_check(self):
         # model = self.create_model(self.args.network)
-        cfg = get_efficientdet_config('tf_efficientdet_d1')
+        cfg = get_efficientdet_config(f'tf_efficientdet_{self.args.network}')
         model = EfficientDet(cfg)
         bench = DetBenchTrain(model)
 
@@ -46,18 +51,7 @@ class MyTrainer(Trainer):
                     ]
                 ]
             ),
-            'cls': torch.LongTensor(
-                [
-                    [
-                        1,
-                        2
-                    ],
-                    [
-                        1,
-                        2
-                    ]
-                ],
-            ),
+            'cls': torch.LongTensor( [ [ 1, 2 ], [ 1, 2 ], ]) ,
         }
         print(targets['bbox'].shape)
         loss = bench(images, targets)
@@ -71,19 +65,18 @@ class MyTrainer(Trainer):
         # print(regression_loss)
 
     def arg_common(self, parser):
+        parser.add_argument('-n', '--network', default='d1', type=str, help='efficientdet-[d0, d1, ..]')
         parser.add_argument('-e', '--epoch', type=int, default=50)
-        parser.add_argument('-n', '--num-workers', type=int, default=os.cpu_count()//2)
         parser.add_argument('-b', '--batch-size', type=int, default=48)
-        parser.add_argument('-t', '--tile', type=int, default=512)
-        parser.add_argument('--lr', type=float, default=0.0001)
+        parser.add_argument('--lr', type=float, default=0.01)
         parser.add_argument('--no-aug', action='store_true')
-        parser.add_argument('--network', default='d0', type=str, help='efficientdet-[d0, d1, ..]')
+        parser.add_argument('--workers', type=int, default=os.cpu_count()//2)
 
     def save_state(self, model, epoch):
         state = {
             'epoch': epoch,
             'args': self.args,
-            'state_dict': model.get_state_dict(),
+            'state_dict': get_state_dict(model),
         }
         weights_dir = f'weights/{self.args.network}'
         os.makedirs(weights_dir, exist_ok=True)
@@ -102,21 +95,24 @@ class MyTrainer(Trainer):
         transform_x = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize(*[[v] * 3 for v in train_dataset.get_mean_and_std()]),
+            lambda x: x.permute([0, 2, 1]),
         ])
         transform_y = transforms.Compose([
             lambda y: label_to_tensor(y, self.device),
         ])
         train_dataset.set_transforms(transform_x, transform_y)
+        tile_size = SIZE_BY_NETWORK[self.args.network]
         if self.args.no_aug:
-            aug = ResizeAugmentation(tile_size=self.args.tile)
+            aug = ResizeAugmentation(tile_size=tile_size)
+            # aug = CropAugmentation(tile_size=tile_size)
         else:
-            aug = Augmentation(tile_size=self.args.tile)
+            aug = Augmentation(tile_size=tile_size)
         train_dataset.set_augmentaion(aug)
 
         train_loader = DataLoader(
             train_dataset,
             batch_size=self.args.batch_size,
-            num_workers=self.args.num_workers,
+            num_workers=self.args.workers,
         )
         return train_loader, None
 
@@ -146,20 +142,25 @@ class MyTrainer(Trainer):
 
         return {k: np.mean(v) for k, v in metrics.items()}
 
-    def do_train(self, model, starting_epoch):
+    def arg_yolo(self, parser):
+        pass
+
+    def run_yolo(self):
+        model = self.create_model(self.args.network)
+        bench = DetBenchTrain(model).to(self.device)
+
         train_loader, __test_loader = self.create_loaders()
 
-        bench = DetBenchTrain(model).to(self.device)
         optimizer = optim.Adam(model.parameters(), lr=self.args.lr)
-        # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3, verbose=True)
-        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda x: 0.95 ** x)
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2, verbose=True)
+        # scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda x: 0.95 ** x)
 
         print('Starting training')
-        for epoch in range(starting_epoch, self.args.epoch + 1):
+        for epoch in range(1, self.args.epoch + 1):
             header = f'[{epoch}/{self.args.epoch}] '
 
-            lr = scheduler.get_last_lr()[0]
-            # lr = optimizer.param_groups[0]["lr"]
+            # lr = scheduler.get_last_lr()[0]
+            lr = optimizer.param_groups[0]["lr"]
             print(f'{header}Starting lr={lr:.7f}')
 
             train_metrics = self.train_epoch(
@@ -177,33 +178,12 @@ class MyTrainer(Trainer):
 
             #* save weights
             if epoch % 10 == 0:
-                weights_path = self.save_state(model, epoch)
+                weights_path = self.save_state(bench.model, epoch)
                 print(f'{header}Saved "{weights_path}"')
 
-            # scheduler.step(train_metrics['loss'])
-            scheduler.step()
+            scheduler.step(train_metrics['loss'])
+            # scheduler.step()
             print()
-
-    def arg_start(self, parser):
-        pass
-
-    def run_start(self):
-        model = self.create_model(self.args.network)
-        self.do_train(model, 1)
-
-    def arg_restore(self, parser):
-        parser.add_argument('-w', '--weights', type=str, required=True)
-
-    def pre_restore(self):
-        pass
-
-    def run_restore(self):
-        pass
-        # state = torch.load(self.args.weights)
-        # model = self.create_model(self.args.network)
-        # model.load_state_dict(torch.load(state['state_dict']))
-        # self.do_train(model, state[epoch] + 1)
-
 
 
 MyTrainer().run()

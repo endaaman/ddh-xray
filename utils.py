@@ -1,3 +1,4 @@
+import os
 from typing import List
 
 import torch
@@ -47,6 +48,12 @@ def read_label(path):
         ])
     return pd.DataFrame(columns=cols, data=data)
 
+def get_state_dict(model):
+    if type(model) == torch.nn.DataParallel:
+        return model.module.state_dict()
+    else:
+        return model.state_dict()
+
 def label_to_tensor(label):
     return torch.from_numpy(label.values).type(torch.FloatTensor)
 
@@ -54,6 +61,7 @@ class XrayBBItem:
     def __init__(self, image_path, label_path):
         self.image_path = image_path
         self.label_path = label_path
+        self.name = os.path.splitext(os.path.basename(image_path))[0]
         self.image = Image.open(self.image_path)
         if self.image.width != IMAGE_SIZE or self.image.height != IMAGE_SIZE:
             raise Exception(f'invalid size! {image_path}: {self.image.width} {self.image.height}')
@@ -89,4 +97,3 @@ def calc_mean_and_std(images):
 
 if __name__ == '__main__':
     label = read_label('data/yolo/train/label/0001.txt')
-    print(label)

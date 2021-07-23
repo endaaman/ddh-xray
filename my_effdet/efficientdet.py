@@ -94,12 +94,6 @@ class EfficientDet(nn.Module):
             if isinstance(layer, nn.BatchNorm2d):
                 layer.eval()
 
-    def get_state_dict(self):
-        if type(self) == torch.nn.DataParallel:
-            return self.module.state_dict()
-        else:
-            return self.state_dict()
-
     def extract_feat(self, img):
         """
             Directly extract features from the backbone+neck
