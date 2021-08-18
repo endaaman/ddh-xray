@@ -14,32 +14,48 @@ import lightgbm as lgb
 from endaaman import Commander
 
 
+SEED = 42
+
 col_target = 'treatment'
 # cols_feature = df.columns.values.tolist()[1:-1] # exclude label, treatment
-cols_feature = ['sex', 'family_history', 'breech_presentation', 'skin_laterality', ' limb_limitation']
-cols_cat = copy.deepcopy(cols_feature)
+# cols_cat = ['sex', 'family_history', 'breech_presentation', 'skin_laterality', 'limb_limitation']
+cols_cat = ['sex', 'breech_presentation']
+cols_val = ['left_alpha', 'right_alpha', 'left_oe', 'right_oe', 'left_a', 'right_a', 'left_b', 'right_b', ]
+cols_feature = cols_cat + cols_val
 
 class GBM(Commander):
     def get_data(self):
-        df = pd.read_excel('data/table.xlsx')
+        df = pd.read_excel('data/table.xlsx', index_col=0)
         df_train = df[df['test'] == 0]
         df_test = df[df['test'] == 1]
-        return df, df_train, df_test
 
-    def run_train(self):
-        df, df_train, df_test = self.get_data()
+        df_measure_train = pd.read_excel('data/measurement_train.xlsx', index_col=0)
+        df_measure_test = pd.read_excel('data/measurement_test.xlsx', index_col=0)
 
-        folds = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-        folds = folds.split(np.arange(len(df_train)), y=df_train[col_target]) # 各foldターゲットのラベルの分布がそろうようにする = stratified K fold
+        df_train = pd.concat([df_train, df_measure_train], axis=1)
+        df_test = pd.concat([df_test, df_measure_test], axis=1)
+        return df_train, df_test
+
+    def run_demo(self, args):
+        df_train, df_test = self.get_data()
+        print(df_test)
+        print(df_train)
+
+    def run_train(self, args):
+        df_train, df_test = self.get_data()
+
+        folds = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
+        # 各foldターゲットのラベルの分布がそろうようにする = stratified K fold
+        folds = folds.split(np.arange(len(df_train)), y=df_train[col_target])
         folds = list(folds)
 
-        params = {
+        gbm_params = {
             'objective': 'binary', # 目的->2値分類
             'num_threads': -1,
-            'bagging_seed': 42, # random seed の固定
-            'random_state': 42, # random seed の固定
+            'bagging_seed': SEED,
+            'random_state': SEED,
             'boosting': 'gbdt',
-            'metric': 'auc', # 評価変数->AUC
+            'metric': 'auc',
             'verbosity': -1,
         }
 
@@ -59,7 +75,7 @@ class GBM(Commander):
             valid_data = lgb.Dataset(x_valid, label=y_valid, categorical_feature=cols_cat)
 
             model = lgb.train(
-                params, # モデルのパラメータ
+                gbm_params, # モデルのパラメータ
                 train_data, # 学習データ
                 1000, # 学習を繰り返す最大epoch数, epoch = モデルの学習回数
                 valid_sets=[train_data, valid_data], # 検証データ
@@ -90,8 +106,8 @@ class GBM(Commander):
         model.save_model(p)
         print(f'wrote {p}')
 
-    def run_roc(self):
-        df, df_train, df_test = self.get_data()
+    def run_roc(self, args):
+        df_train, df_test = self.get_data()
 
         model = lgb.Booster(model_file='out/model.txt')
 
