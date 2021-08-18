@@ -16,6 +16,7 @@ from augmentation import Augmentation, ResizeAugmentation, CropAugmentation
 from datasets import XrayDataset, ROIDataset
 from utils import get_state_dict
 from models import VGG
+from metrics import calc_acc, calc_recall, calc_spec
 from endaaman import Trainer
 
 
@@ -27,8 +28,8 @@ class MyTrainer(Trainer):
 
     def arg_common(self, parser):
         parser.add_argument('-e', '--epoch', type=int, default=50)
-        parser.add_argument('-b', '--batch-size', type=int, default=48)
-        parser.add_argument('--lr', type=float, default=0.01)
+        parser.add_argument('-b', '--batch-size', type=int, default=128)
+        parser.add_argument('--lr', type=float, default=0.001)
         parser.add_argument('--no-aug', action='store_true')
         parser.add_argument('--workers', type=int, default=os.cpu_count()//2)
 
@@ -58,9 +59,24 @@ class MyTrainer(Trainer):
     def arg_train(self, parser):
         parser.add_argument('--model', default='vgg16_bn')
 
+    def save_state(self, model, epoch):
+        state = {
+            'epoch': epoch,
+            'args': self.args,
+            'state_dict': get_state_dict(model),
+        }
+        weights_dir = f'weights/{self.args.model}'
+        os.makedirs(weights_dir, exist_ok=True)
+        weights_path = os.path.join(weights_dir, f'{epoch}.pth')
+        torch.save(state, weights_path)
+        return weights_path
+
     def train_epoch(self, model, loader, criterion, optimizer, get_message):
         metrics = {
             'loss': [],
+            'acc': [],
+            'recall': [],
+            'spec': [],
         }
         t = tqdm(loader, leave=False)
         for (inputs, labels) in t:
@@ -73,8 +89,11 @@ class MyTrainer(Trainer):
             optimizer.step()
             iter_metrics = {
                 'loss': float(loss.item()),
+                'acc': calc_acc(outputs, labels),
+                'recall': calc_recall(outputs, labels),
+                'spec': calc_spec(outputs, labels),
             }
-            message = ' '.join([f'{k}:{v:.4f}' for k, v in iter_metrics.items()])
+            message = ' '.join([f'{k}:{v:.3f}' for k, v in iter_metrics.items()])
             t.set_description(get_message(message))
             t.refresh()
             for k, v in iter_metrics.items():
@@ -83,8 +102,7 @@ class MyTrainer(Trainer):
         return {k: np.mean(v) for k, v in metrics.items()}
 
     def run_train(self, args):
-        model = VGG(name=args.model, num_classes=1, pretrained=True)
-
+        model = VGG(name=args.model, num_classes=1, pretrained=True).to(self.device)
         train_loader, __test_loader = self.create_loaders()
 
         optimizer = optim.Adam(model.parameters(), lr=args.lr)
@@ -97,7 +115,7 @@ class MyTrainer(Trainer):
             header = f'[{epoch}/{args.epoch}] '
 
             # lr = scheduler.get_last_lr()[0]
-            lr = optimizer.param_groups[0]["lr"]
+            lr = optimizer.param_groups[0]['lr']
             print(f'{header}Starting lr={lr:.7f}')
 
             train_metrics = self.train_epoch(
@@ -114,8 +132,8 @@ class MyTrainer(Trainer):
                 pass
 
             #* save weights
-            if epoch % 10 == 0:
-                weights_path = self.save_state(bench.model, epoch)
+            if epoch % 20 == 0:
+                weights_path = self.save_state(model, epoch)
                 print(f'{header}Saved "{weights_path}"')
 
             scheduler.step(train_metrics['loss'])

@@ -11,7 +11,7 @@ from collections import namedtuple, Counter
 from recordclass import recordclass, RecordClass
 from tqdm import tqdm
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image, ImageFilter, ImageOps
 from matplotlib import pyplot as plt
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -132,19 +132,24 @@ class ROIDataset(BaseDataset):
         y = int(found['treatment'].values[0])
         if self.augmentation:
             x, y = self.augmentation(x, y)
+        # if y > 0:
+        #     x = ImageOps.invert(x)
         return self.transform(x, y)
 
 if __name__ == '__main__':
     from augmentation import Augmentation, ResizeAugmentation
     ds = ROIDataset()
 
-    t_x = transforms.Compose([
-        transforms.ToTensor(),
-        # ds.get_normalizer(),
-        # lambda x: x.permute([0, 2, 1]),
-    ])
-    t_y = lambda y: torch.tensor(y, dtype=torch.float32)
-    ds.set_transforms(t_x, t_y)
-    loader = DataLoader(ds, batch_size=3, num_workers=1)
-    for i, (x, y) in enumerate(loader):
-        print(i)
+    # t_x = transforms.Compose([
+    #     transforms.ToTensor(),
+    #     # ds.get_normalizer(),
+    #     # lambda x: x.permute([0, 2, 1]),
+    # ])
+    # t_y = lambda y: torch.tensor(y, dtype=torch.float32)
+    # ds.set_transforms(t_x, t_y)
+    # loader = DataLoader(ds, batch_size=3, num_workers=1)
+    # for i, (x, y) in enumerate(loader):
+    #     print(i)
+
+    for i, (x, y) in enumerate(ds):
+        x.save(f'tmp/{i}_{y}.png')
