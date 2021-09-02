@@ -30,13 +30,13 @@ SIZE_BY_NETWORK= {
 }
 
 class MyTrainer(Trainer):
-    def run_check(self):
+    def run_check(self, args):
         # model = self.create_model(self.args.network)
         cfg = get_efficientdet_config(f'tf_efficientdet_{self.args.network}')
         model = EfficientDet(cfg)
         bench = DetBenchTrain(model)
 
-        images = torch.randn(2, 3, 640, 640)
+        images = torch.randn(2, 3, 512, 512)
         # labels = torch.ones(2, 2, 5, dtype=torch.float)
         targets = {
             'bbox': torch.FloatTensor(
@@ -65,7 +65,7 @@ class MyTrainer(Trainer):
         # print(regression_loss)
 
     def arg_common(self, parser):
-        parser.add_argument('-n', '--network', default='d1', type=str, help='efficientdet-[d0, d1, ..]')
+        parser.add_argument('-n', '--network', default='d0', type=str, help='efficientdet-[d0, d1, ..]')
         parser.add_argument('-e', '--epoch', type=int, default=50)
         parser.add_argument('-b', '--batch-size', type=int, default=48)
         parser.add_argument('--lr', type=float, default=0.01)
