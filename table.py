@@ -12,6 +12,7 @@ from sklearn import metrics
 import lightgbm as org_lgb
 import optuna
 import optuna.integration.lightgbm as opt_lgb
+from sklearn.svm import SVC
 from sklearn.model_selection import train_test_split
 
 from endaaman import Commander
@@ -74,17 +75,6 @@ class Table(Commander):
         folds = folds.split(np.arange(len(self.df_train)), y=self.df_train[col_target])
         folds = list(folds)
 
-        gbm_params = {
-            'objective': 'binary', # 目的->2値分類
-            'num_threads': -1,
-            'max_depth': 3,
-            'bagging_seed': self.args.seed,
-            'random_state': self.args.seed,
-            'boosting': 'gbdt',
-            'metric': 'auc',
-            'verbosity': -1,
-        }
-
         preds_valid = np.zeros([len(self.df_train)], np.float32)
         preds_test = np.zeros([5, len(self.df_test)], np.float32)
         df_feature_importance = pd.DataFrame()
@@ -98,27 +88,45 @@ class Table(Commander):
             x_test = self.df_test[cols_feature]
 
             print(f'fold: {fold+1}, train: {len(x_train)}, valid: {len(x_valid)}')
-            train_data = self.lgb.Dataset(x_train, label=y_train, categorical_feature=cols_cat)
-            valid_data = self.lgb.Dataset(x_valid, label=y_valid, categorical_feature=cols_cat)
 
-            model = self.lgb.train(
-                gbm_params, # モデルのパラメータ
-                train_data, # 学習データ
-                1000, # 学習を繰り返す最大epoch数, epoch = モデルの学習回数
-                valid_sets=[train_data, valid_data], # 検証データ
-                verbose_eval=200, # 100 epoch ごとに経過を表示する
-                early_stopping_rounds=150, # 150epoch続けて検証データのロスが減らなかったら学習を中断する
-                categorical_feature=cols_cat,
-            )
+            if self.model == 'lgb':
+                train_data = self.lgb.Dataset(x_train, label=y_train, categorical_feature=cols_cat)
+                valid_data = self.lgb.Dataset(x_valid, label=y_valid, categorical_feature=cols_cat)
+                gbm_params = {
+                    'objective': 'binary', # 目的->2値分類
+                    'num_threads': -1,
+                    'max_depth': 3,
+                    'bagging_seed': self.args.seed,
+                    'random_state': self.args.seed,
+                    'boosting': 'gbdt',
+                    'metric': 'auc',
+                    'verbosity': -1,
+                }
+
+                model = self.lgb.train(
+                    gbm_params, # モデルのパラメータ
+                    train_data, # 学習データ
+                    1000, # 学習を繰り返す最大epoch数, epoch = モデルの学習回数
+                    valid_sets=[train_data, valid_data], # 検証データ
+                    verbose_eval=200, # 100 epoch ごとに経過を表示する
+                    early_stopping_rounds=150, # 150epoch続けて検証データのロスが減らなかったら学習を中断する
+                    categorical_feature=cols_cat,
+                )
+                tmp = pd.DataFrame()
+                tmp['feature'] = cols_feature
+                tmp['importance'] = model.feature_importance()
+                tmp['fold'] = fold + 1
+                df_feature_importance = pd.concat([df_feature_importance, tmp], axis=0)
+            elif self.model == 'svm':
+                model = SVC(kernel='linear', random_state=None)
+                model.fit(x_train, y_train)
+                pred_train = model.predict(X_train_std)
+                accuracy_train = accuracy_score(y_train, pred_train)
+            else:
+                raise Exception(f'Invalid model: {self.args.model}')
 
             preds_valid[folds[fold][1]] = model.predict(x_valid, num_iteration=model.best_iteration)
             preds_test[fold] = model.predict(x_test, num_iteration=model.best_iteration)
-
-            tmp = pd.DataFrame()
-            tmp['feature'] = cols_feature
-            tmp['importance'] = model.feature_importance()
-            tmp['fold'] = fold + 1
-            df_feature_importance = pd.concat([df_feature_importance, tmp], axis=0)
             models.append(model)
 
         score = metrics.roc_auc_score(self.df_train[col_target], preds_valid)
