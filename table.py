@@ -28,11 +28,15 @@ cols_val = ['sex', 'breech_presentation', 'left_alpha', 'right_alpha', 'left_oe'
 cols_feature = cols_cat + cols_val
 
 
-class GBM(Commander):
+class Table(Commander):
+    def get_suffix(self):
+        return '_' + self.args.suffix if self.args.suffix else ''
+
     def arg_common(self, parser):
         parser.add_argument('-r', '--test-ratio', type=float)
         parser.add_argument('-o', '--use-optuna', action='store_true')
-        parser.add_argument('-s', '--seed', type=int, default=42)
+        parser.add_argument('-e', '--seed', type=int, default=42)
+        parser.add_argument('-s', '--suffix')
 
     def pre_common(self):
         df = pd.read_excel('data/table.xlsx', index_col=0)
@@ -73,6 +77,7 @@ class GBM(Commander):
         gbm_params = {
             'objective': 'binary', # 目的->2値分類
             'num_threads': -1,
+            'max_depth': 3,
             'bagging_seed': self.args.seed,
             'random_state': self.args.seed,
             'boosting': 'gbdt',
@@ -84,6 +89,7 @@ class GBM(Commander):
         preds_test = np.zeros([5, len(self.df_test)], np.float32)
         df_feature_importance = pd.DataFrame()
 
+        models = []
         for fold in range(5):
             x_train = self.df_train.iloc[folds[fold][0]][cols_feature]
             y_train = self.df_train.iloc[folds[fold][0]][col_target]
@@ -100,20 +106,20 @@ class GBM(Commander):
                 train_data, # 学習データ
                 1000, # 学習を繰り返す最大epoch数, epoch = モデルの学習回数
                 valid_sets=[train_data, valid_data], # 検証データ
-                verbose_eval=100, # 100 epoch ごとに経過を表示する
+                verbose_eval=200, # 100 epoch ごとに経過を表示する
                 early_stopping_rounds=150, # 150epoch続けて検証データのロスが減らなかったら学習を中断する
                 categorical_feature=cols_cat,
             )
 
-            preds_valid[folds[fold][1]] = model.predict(x_valid, num_iteration=model.best_iteration) # 検証データに対する予測を実行
-            preds_test[fold] = model.predict(x_test, num_iteration=model.best_iteration)  # テストデータに対する予測を実行
+            preds_valid[folds[fold][1]] = model.predict(x_valid, num_iteration=model.best_iteration)
+            preds_test[fold] = model.predict(x_test, num_iteration=model.best_iteration)
 
-            # 特徴量の重要度を記録
             tmp = pd.DataFrame()
             tmp['feature'] = cols_feature
             tmp['importance'] = model.feature_importance()
             tmp['fold'] = fold + 1
             df_feature_importance = pd.concat([df_feature_importance, tmp], axis=0)
+            models.append(model)
 
         score = metrics.roc_auc_score(self.df_train[col_target], preds_valid)
         print(f'CV AUC: {score:.6f}')
@@ -121,23 +127,38 @@ class GBM(Commander):
         df_tmp = df_feature_importance.groupby('feature').agg('mean').reset_index()
         df_tmp = df_tmp.sort_values('importance', ascending=False)
         print(df_tmp[['feature', 'importance']])
-        df_tmp.to_csv('out/importance.csv')
+        # df_tmp.to_csv('out/importance.csv')
 
-        p = 'out/model.txt'
-        model.save_model(p)
+        # p = f'out/model{self.get_suffix()}.txt'
+        # model.save_model(p)
+        checkpoint = {
+            'models': [m.model_to_string() for m in models],
+        }
+        p = f'out/model{self.get_suffix()}.pth'
+        torch.save(checkpoint, p)
         print(f'wrote {p}')
-        if self.args.roc:
-            self.draw_roc(model)
 
-    def draw_roc(self, model):
+        if self.args.roc:
+            self.draw_roc(models)
+
+    def draw_roc(self, models):
         x_train = self.df_train[cols_feature]
         y_train = self.df_train[col_target]
 
         x_test = self.df_test[cols_feature]
         y_test = self.df_test[col_target]
 
-        pred_train = model.predict(x_train, num_iteration=model.best_iteration)
-        pred_test = model.predict(x_test, num_iteration=model.best_iteration)
+        preds_train = []
+        preds_test = []
+        for model in models:
+            preds_train.append(model.predict(x_train, num_iteration=model.best_iteration))
+            preds_test.append(model.predict(x_test, num_iteration=model.best_iteration))
+        pred_train = np.mean(preds_train, axis=0)
+        pred_test = np.mean(preds_test, axis=0)
+
+        # model = models[0]
+        # pred_train = model.predict(x_train, num_iteration=model.best_iteration)
+        # pred_test = model.predict(x_test, num_iteration=model.best_iteration)
 
         for (t, y, pred) in (('train', y_train, pred_train), ('test', y_test, pred_test)):
             fpr, tpr, thresholds = metrics.roc_curve(y, pred)
@@ -149,7 +170,7 @@ class GBM(Commander):
         plt.xlabel('False Positive Rate')
         plt.ylabel('True Positive Rate')
         plt.grid(True)
-        p = 'out/roc.png'
+        p = f'out/roc{self.get_suffix()}.png'
         plt.savefig(p)
         plt.show()
         print(f'wrote {p}')
@@ -162,6 +183,4 @@ class GBM(Commander):
         self.draw_roc(model)
 
 
-
-GBM().run()
-
+Table().run()
