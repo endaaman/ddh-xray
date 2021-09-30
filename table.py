@@ -14,6 +14,7 @@ import optuna
 import optuna.integration.lightgbm as opt_lgb
 from sklearn.svm import SVC
 from sklearn.model_selection import train_test_split
+from sklearn.impute import SimpleImputer, KNNImputer
 
 from endaaman import Commander
 
@@ -29,6 +30,39 @@ cols_val = ['sex', 'breech_presentation', 'left_alpha', 'right_alpha', 'left_oe'
 cols_feature = cols_cat + cols_val
 
 
+class Model:
+    def train(self, x, y):
+        pass
+
+    def predict(self, x, y):
+        pass
+
+    def serialize(self):
+        pass
+
+    def restore(self, data):
+        pass
+
+class GBMModel():
+    def __init__(self):
+        pass
+
+    def train(self, x, y):
+        pass
+
+    def predict(self, x, y):
+        pass
+
+    def serialize(self):
+        pass
+
+    def restore(self, data):
+        pass
+
+
+def impute(imp, x):
+    return pd.DataFrame(imp.fit(x).transform(x), columns=x.columns)
+
 class Table(Commander):
     def get_suffix(self):
         return '_' + self.args.suffix if self.args.suffix else ''
@@ -40,18 +74,23 @@ class Table(Commander):
         parser.add_argument('-s', '--suffix')
 
     def pre_common(self):
+        imp = SimpleImputer(missing_values=np.nan, strategy='median')
+
         df = pd.read_excel('data/table.xlsx', index_col=0)
         df_train = df[df['test'] == 0]
         df_test = df[df['test'] == 1]
 
         df_measure_train = pd.read_excel('data/measurement_train.xlsx', index_col=0)
         df_measure_test = pd.read_excel('data/measurement_test.xlsx', index_col=0)
-
         df_train = pd.concat([df_train, df_measure_train], axis=1)
         df_test = pd.concat([df_test, df_measure_test], axis=1)
 
+        if self.args.model == 'svm':
+            df_train = impute(imp, df_train)
+            df_test = impute(imp, df_test)
+
         self.df_all = pd.concat([df_train, df_test])
-        self.df_all.loc[:, cols_cat]= self.df_all[cols_cat].astype('category')
+        # self.df_all.loc[:, cols_cat]= self.df_all[cols_cat].astype('category')
 
         if self.args.test_ratio:
             df_train, df_test = train_test_split(self.df_all, test_size=self.args.test_ratio, random_state=self.args.seed)
@@ -68,6 +107,7 @@ class Table(Commander):
 
     def arg_train(self, parser):
         parser.add_argument('--roc', action='store_true')
+        parser.add_argument('-m', '--model', default='gbm')
 
     def run_train(self):
         folds = StratifiedKFold(n_splits=5, shuffle=True, random_state=self.args.seed)
@@ -89,7 +129,7 @@ class Table(Commander):
 
             print(f'fold: {fold+1}, train: {len(x_train)}, valid: {len(x_valid)}')
 
-            if self.model == 'lgb':
+            if self.args.model == 'gbm':
                 train_data = self.lgb.Dataset(x_train, label=y_train, categorical_feature=cols_cat)
                 valid_data = self.lgb.Dataset(x_valid, label=y_valid, categorical_feature=cols_cat)
                 gbm_params = {
@@ -117,30 +157,38 @@ class Table(Commander):
                 tmp['importance'] = model.feature_importance()
                 tmp['fold'] = fold + 1
                 df_feature_importance = pd.concat([df_feature_importance, tmp], axis=0)
-            elif self.model == 'svm':
+
+                preds_valid[folds[fold][1]] = model.predict(x_valid, num_iteration=model.best_iteration)
+                preds_test[fold] = model.predict(x_test, num_iteration=model.best_iteration)
+            elif self.args.model == 'svm':
                 model = SVC(kernel='linear', random_state=None)
                 model.fit(x_train, y_train)
-                pred_train = model.predict(X_train_std)
-                accuracy_train = accuracy_score(y_train, pred_train)
+                pred_train = model.predict(x_train)
+                # accuracy_train = metrics.auc(y_train, pred_train)
+
+                preds_valid[folds[fold][1]] = model.predict(x_valid)
+                preds_test[fold] = model.predict(x_test)
             else:
                 raise Exception(f'Invalid model: {self.args.model}')
 
-            preds_valid[folds[fold][1]] = model.predict(x_valid, num_iteration=model.best_iteration)
-            preds_test[fold] = model.predict(x_test, num_iteration=model.best_iteration)
             models.append(model)
 
         score = metrics.roc_auc_score(self.df_train[col_target], preds_valid)
         print(f'CV AUC: {score:.6f}')
 
-        df_tmp = df_feature_importance.groupby('feature').agg('mean').reset_index()
-        df_tmp = df_tmp.sort_values('importance', ascending=False)
-        print(df_tmp[['feature', 'importance']])
-        # df_tmp.to_csv('out/importance.csv')
+        if self.args.model == 'gbm':
+            df_tmp = df_feature_importance.groupby('feature').agg('mean').reset_index()
+            df_tmp = df_tmp.sort_values('importance', ascending=False)
+            print(df_tmp[['feature', 'importance']])
+            # df_tmp.to_csv('out/importance.csv')
+            model_data = [m.model_to_string() for m in models]
+        else:
+            model_data = models
 
         # p = f'out/model{self.get_suffix()}.txt'
         # model.save_model(p)
         checkpoint = {
-            'models': [m.model_to_string() for m in models],
+            'model_data': model_data,
         }
         p = f'out/model{self.get_suffix()}.pth'
         torch.save(checkpoint, p)
@@ -159,8 +207,14 @@ class Table(Commander):
         preds_train = []
         preds_test = []
         for model in models:
-            preds_train.append(model.predict(x_train, num_iteration=model.best_iteration))
-            preds_test.append(model.predict(x_test, num_iteration=model.best_iteration))
+            if self.args.model == 'gbm':
+                preds_train.append(model.predict(x_train, num_iteration=model.best_iteration))
+                preds_test.append(model.predict(x_test, num_iteration=model.best_iteration))
+            elif self.args.model == 'svm':
+                preds_train.append(model.predict(x_train))
+                preds_test.append(model.predict(x_test))
+            else:
+                raise Exception(f'Invalid model: {self.args.model}')
         pred_train = np.mean(preds_train, axis=0)
         pred_test = np.mean(preds_test, axis=0)
 
