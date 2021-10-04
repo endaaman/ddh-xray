@@ -4,6 +4,10 @@ from sklearn.svm import SVC
 from sklearn.model_selection import StratifiedKFold, KFold
 from sklearn.impute import SimpleImputer, KNNImputer
 
+import torch
+from torch import nn
+from torch.utils.data import TensorDataset, DataLoader
+
 from datasets import cols_cat, col_target, cols_feature
 
 
@@ -169,6 +173,66 @@ class SVMBench(Bench):
     def _predict(self, model, x):
         x = self.impute(x)
         return model.predict(x)
+
+    def serialize(self):
+        pass
+
+    def restore(self, data):
+        pass
+
+class NNModel(nn.Module):
+    def __init__(self, num_feature, num_classes):
+        super().__init__()
+        cfg = [
+            64,
+            64,
+            num_classes,
+        ]
+        last_feat = num_feature
+        layers = []
+        for i, n in enumerate(cfg):
+            layers.append(nn.Linear(last_feat, n))
+            last_feat = n
+            if i != len(cfg) - 1:
+                layers.append(nn.Dropout())
+
+        self.dense = nn.Sequential(*layers)
+
+    def forward(self, x):
+        x = self.dense(x)
+        return x
+
+
+class NNBench(Bench):
+    def __init__(self, batch_size=24, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.batch_size = batch_size
+
+    def _train(self, x_train, y_train, x_valid, y_valid):
+        # impute
+        x_train = x_train.copy()
+        y_train = y_train.copy()
+        x_train[x_train.isna()] = -1000
+        y_train[y_train.isna()] = -1000
+
+        model = NNModel(num_feature=x_train.shape[-1], num_classes=1)
+
+        ds = TensorDataset(
+            torch.from_numpy(x_train.values),
+            torch.from_numpy(y_train.values))
+        loader = DataLoader(ds, batch_size=self.batch_size)
+        # for (inputs, labels) in loader:
+        #     print(inputs.shape)
+
+        return model
+
+    def _predict(self, model, x):
+        # TODO: impl NNModel eval
+        # model.eval()
+        # print(x)
+        # t = model(x)
+        # print(t.shape)
+        # return t
 
     def serialize(self):
         pass

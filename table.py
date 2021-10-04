@@ -16,7 +16,7 @@ import optuna.integration.lightgbm as opt_lgb
 from sklearn.model_selection import train_test_split
 
 from endaaman import Commander
-from bench import SVMBench, LightGBMBench
+from bench import SVMBench, LightGBMBench, NNBench
 from datasets import cols_cat, col_target, cols_feature
 
 
@@ -71,13 +71,17 @@ class Table(Commander):
                 imputer=args.imputer,
                 svm_kernel=args.kernel,
             ),
+            'nn': lambda: NNBench(
+                use_fold=not args.no_fold,
+                seed=args.seed,
+            ),
         }[args.model]()
 
     def arg_train(self, parser):
         parser.add_argument('--roc', action='store_true')
         parser.add_argument('--no-fold', action='store_true')
         parser.add_argument('-i', '--imputer')
-        parser.add_argument('-m', '--model', default='gbm', choices=['gbm', 'svm'])
+        parser.add_argument('-m', '--model', default='gbm', choices=['gbm', 'svm', 'nn'])
         parser.add_argument('-k', '--kernel', default='rbf')
 
     def run_train(self):
