@@ -1,3 +1,4 @@
+import random
 import os
 import copy
 from PIL import Image
@@ -10,9 +11,7 @@ from tqdm import tqdm
 
 from sklearn.model_selection import StratifiedKFold, KFold
 from sklearn import metrics
-import lightgbm as org_lgb
 import optuna
-import optuna.integration.lightgbm as opt_lgb
 from sklearn.model_selection import train_test_split
 
 from endaaman import Commander
@@ -35,6 +34,11 @@ class Table(Commander):
         parser.add_argument('-o', '--optuna', action='store_true')
 
     def pre_common(self):
+        np.random.seed(self.args.seed)
+        random.seed(self.args.seed)
+        torch.manual_seed(self.args.seed)
+        torch.cuda.manual_seed(self.args.seed)
+
         df = pd.read_excel('data/table.xlsx', index_col=0)
         df_train = df[df['test'] == 0]
         df_test = df[df['test'] == 1]
@@ -74,6 +78,7 @@ class Table(Commander):
             'nn': lambda: NNBench(
                 use_fold=not args.no_fold,
                 seed=args.seed,
+                epoch=100,
             ),
         }[args.model]()
 

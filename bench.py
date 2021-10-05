@@ -1,11 +1,14 @@
 from tqdm import tqdm
+import pandas as pd
 import numpy as np
 from sklearn.svm import SVC
 from sklearn.model_selection import StratifiedKFold, KFold
+from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer, KNNImputer
-
+import optuna.integration.lightgbm as opt_lgb
+import lightgbm as org_lgb
 import torch
-from torch import nn
+from torch import nn, optim
 from torch.utils.data import TensorDataset, DataLoader
 
 from datasets import cols_cat, col_target, cols_feature
@@ -19,6 +22,9 @@ class Bench:
     def impute(self, x):
         # return pd.DataFrame(self.imp.fit(x).transform(x), columns=x.columns)
         return self.imputer.fit(x).transform(x)
+
+    def preprocess(self, x, y):
+        return x, y
 
     def train(self, df_train):
         if not self.use_fold:
@@ -36,11 +42,17 @@ class Bench:
         folds = list(folds)
         models = []
         for fold in range(5):
-            x_train = df_train.iloc[folds[fold][0]][cols_feature]
-            y_train = df_train.iloc[folds[fold][0]][col_target]
-            x_valid = df_train.iloc[folds[fold][1]][cols_feature]
-            y_valid = df_train.iloc[folds[fold][1]][col_target]
-            model = self._train(x_train, y_train, x_valid, y_valid)
+            print(f'fold {fold}/5')
+            vv = [
+                df_train.iloc[folds[fold][0]][cols_feature], # x_train
+                df_train.iloc[folds[fold][0]][col_target],   # y_train
+                df_train.iloc[folds[fold][1]][cols_feature], # x_valid
+                df_train.iloc[folds[fold][1]][col_target],   # y_valid
+            ]
+            vv = [v.copy() for v in vv]
+            vv[0], vv[1] = self.preprocess(*vv[:2])
+            vv[2], vv[3]  = self.preprocess(*vv[2:])
+            model = self._train(*vv)
             models.append(model)
         self.models = models
 
@@ -50,7 +62,7 @@ class Bench:
     def predict(self, x):
         preds = []
         for model in self.models:
-            preds.append(self._predict(model, x))
+            preds.append(self._predict(model, x.copy()))
         return np.mean(preds, axis=0)
 
     def _predict(self, model, x):
@@ -75,7 +87,6 @@ class LightGBMBench(Bench):
         else:
             self.imputer = None
 
-
     def train(self, df_train):
         super().train(df_train)
         # df_tmp = df_feature_importance.groupby('feature').agg('mean').reset_index()
@@ -83,11 +94,17 @@ class LightGBMBench(Bench):
         # print(df_tmp[['feature', 'importance']])
         # # df_tmp.to_csv('out/importance.csv')
 
-    def _train(self, x_train, y_train, x_valid, y_valid):
+    def preprocess(self, x, y):
+        # label smoothing
+        q = x.isnull().any(axis=1)
+        epsilon = 0.4
+        y[q] *= epsilon
+        y[q] += (1-epsilon)/2
         if self.imputer:
-            print('use imputer')
-            x_train = self.impute(x_train)
-            x_valid = self.impute(x_valid)
+            x = self.impute(x)
+        return x, y
+
+    def _train(self, x_train, y_train, x_valid, y_valid):
         gbm_params = {
             'objective': 'binary', # 目的->2値分類
             'num_threads': -1,
@@ -180,11 +197,28 @@ class SVMBench(Bench):
     def restore(self, data):
         pass
 
+class SkipLinear(nn.Module):
+    def __init__(self, a):
+        super().__init__()
+        self.dense = nn.Linear(a, a)
+        self.dropout = nn.Dropout()
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        y = self.dense(x)
+        x = x + y
+        x = self.dropout(x)
+        x = self.relu(x)
+        return x
+
+
 class NNModel(nn.Module):
     def __init__(self, num_feature, num_classes):
         super().__init__()
         cfg = [
             64,
+            128,
+            128,
             64,
             num_classes,
         ]
@@ -193,49 +227,99 @@ class NNModel(nn.Module):
         for i, n in enumerate(cfg):
             layers.append(nn.Linear(last_feat, n))
             last_feat = n
-            if i != len(cfg) - 1:
-                layers.append(nn.Dropout())
 
-        self.dense = nn.Sequential(*layers)
+            if i != len(cfg) - 1:
+                layers.append(nn.Dropout(p=0.2))
+                layers.append(nn.ReLU())
+
+        self.fc = nn.Sequential(*layers)
 
     def forward(self, x):
-        x = self.dense(x)
-        return x
+        x = self.fc(x)
+        return torch.sigmoid(x)
 
 
 class NNBench(Bench):
-    def __init__(self, batch_size=24, *args, **kwargs):
+    def __init__(self, epoch=2000, batch_size=24, device='cpu', *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.epoch = epoch
         self.batch_size = batch_size
+        self.device = device
+
+    def as_loader(self, x, y):
+        ds = TensorDataset(
+            torch.from_numpy(x.values).type(torch.FloatTensor),
+            torch.from_numpy(y.values).type(torch.FloatTensor)[:, None])
+        return DataLoader(ds, batch_size=self.batch_size)
+
+    def preprocess(self, x, y):
+        # label smoothing
+        q = x.isnull().any(axis=1)
+        epsilon = 0.4
+        y[q] *= epsilon
+        y[q] += (1-epsilon)/2
+
+        x[x.isna()] = -1000
+        y[y.isna()] = -1000
+        return x, y
 
     def _train(self, x_train, y_train, x_valid, y_valid):
-        # impute
-        x_train = x_train.copy()
-        y_train = y_train.copy()
-        x_train[x_train.isna()] = -1000
-        y_train[y_train.isna()] = -1000
-
         model = NNModel(num_feature=x_train.shape[-1], num_classes=1)
+        train_loader = self.as_loader(x_train, y_train)
+        valid_loader = self.as_loader(x_valid, y_valid)
 
-        ds = TensorDataset(
-            torch.from_numpy(x_train.values),
-            torch.from_numpy(y_train.values))
-        loader = DataLoader(ds, batch_size=self.batch_size)
-        # for (inputs, labels) in loader:
-        #     print(inputs.shape)
+        optimizer = optim.Adam(model.parameters(), lr=0.001)
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3)
+        criterion = nn.BCELoss()
+
+        e = tqdm(range(self.epoch))
+        for epoch in e:
+            losses = []
+            model.train()
+            for (x, y) in train_loader:
+                optimizer.zero_grad()
+                z = model(x)
+                loss = criterion(z, y)
+                loss.backward()
+                optimizer.step()
+                losses.append(loss.item())
+            train_loss = np.mean(losses)
+            scheduler.step(train_loss)
+            model.eval()
+            losses = []
+            with torch.no_grad():
+                for (x, y) in valid_loader:
+                    z = model(x)
+                    loss = criterion(z, y)
+                    losses.append(loss.item())
+            valid_loss = np.mean(losses)
+
+            lr = optimizer.param_groups[0]['lr']
+            if lr < 0.0000001:
+                break
+            e.set_description(f'[loss] train: {train_loss:.2f} val: {valid_loss:.2f} lr: {lr:.7f}')
+            e.refresh()
 
         return model
 
     def _predict(self, model, x):
-        # TODO: impl NNModel eval
-        # model.eval()
-        # print(x)
-        # t = model(x)
-        # print(t.shape)
-        # return t
+        x[x.isna()] = -1000
+        outputs = []
+        for start in tqdm(range(0, len(x), self.batch_size)):
+            batch = x[start:start + self.batch_size]
+            input_tensor = torch.from_numpy(batch.values).type(torch.FloatTensor)
+            output_tensor = model(input_tensor)
+            outputs.append(output_tensor)
+        outputs = torch.cat(outputs)
+        return outputs.cpu().detach().numpy()
 
     def serialize(self):
         pass
 
     def restore(self, data):
         pass
+
+if __name__ == '__main__':
+    m = NNModel(10, 1)
+    i = torch.ones([24, 10])
+    print(m(i).shape)
