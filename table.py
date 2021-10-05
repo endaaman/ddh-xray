@@ -62,8 +62,8 @@ class Table(Commander):
         print(len(self.df_test))
         print(len(self.df_train))
 
-    def create_bench_by_args(self, args):
-        return {
+    def create_benchs_by_args(self, args):
+        t = {
             'gbm': lambda: LightGBMBench(
                 use_fold=not args.no_fold,
                 seed=args.seed,
@@ -80,48 +80,45 @@ class Table(Commander):
                 seed=args.seed,
                 epoch=100,
             ),
-        }[args.model]()
+        }
+        return [t[m]() for m in args.model]
 
     def arg_train(self, parser):
         parser.add_argument('--roc', action='store_true')
         parser.add_argument('--no-fold', action='store_true')
         parser.add_argument('-i', '--imputer')
-        parser.add_argument('-m', '--model', default='gbm', choices=['gbm', 'svm', 'nn'])
+        parser.add_argument('-m', '--model', default='gbm', nargs='+', choices=['gbm', 'svm', 'nn'])
         parser.add_argument('-k', '--kernel', default='rbf')
 
     def run_train(self):
-        bench = self.create_bench_by_args(self.args)
+        benchs = self.create_benchs_by_args(self.args)
 
-        preds_valid = np.zeros([len(self.df_train)], np.float32)
-        preds_test = np.zeros([5, len(self.df_test)], np.float32)
-        df_feature_importance = pd.DataFrame()
-
-        bench.train(self.df_train)
-        score = metrics.roc_auc_score(self.df_train[col_target], preds_valid)
-        print(f'CV AUC: {score:.6f}')
+        for b in benchs:
+            b.train(self.df_train)
 
         # p = f'out/model{self.get_suffix()}.txt'
         # model.save_model(p)
         checkpoint = {
             'args': self.args,
-            'model_data': bench.serialize(),
+            'model_data': [b.serialize() for b in benchs],
         }
         p = f'out/model{self.get_suffix()}.pth'
         torch.save(checkpoint, p)
         print(f'wrote {p}')
 
         if self.args.roc:
-            self.draw_roc(bench)
+            self.draw_roc(benchs)
 
-    def draw_roc(self, bench):
+    def draw_roc(self, benchs):
         x_train = self.df_train[cols_feature]
         y_train = self.df_train[col_target]
-
         x_test = self.df_test[cols_feature]
         y_test = self.df_test[col_target]
 
-        pred_train = bench.predict(x_train)
-        pred_test = bench.predict(x_test)
+        preds_train = [b.predict(x_train) for b in benchs]
+        preds_test = [b.predict(x_test) for b in benchs]
+        pred_train = np.mean(preds_train, axis=0)
+        pred_test = np.mean(preds_test, axis=0)
 
         for (t, y, pred) in (('train', y_train, pred_train), ('test', y_test, pred_test)):
             fpr, tpr, thresholds = metrics.roc_curve(y, pred)

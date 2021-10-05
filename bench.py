@@ -18,6 +18,7 @@ class Bench:
     def __init__(self, use_fold, seed):
         self.use_fold = use_fold
         self.seed = seed
+        self.scaler = StandardScaler()
 
     def impute(self, x):
         # return pd.DataFrame(self.imp.fit(x).transform(x), columns=x.columns)
@@ -89,6 +90,12 @@ class LightGBMBench(Bench):
 
     def train(self, df_train):
         super().train(df_train)
+
+        # preds_valid = np.zeros([len(self.df_train)], np.float32)
+        # preds_test = np.zeros([5, len(self.df_test)], np.float32)
+        # df_feature_importance = pd.DataFrame()
+        # score = metrics.roc_auc_score(self.df_train[col_target], preds_valid)
+        # print(f'CV AUC: {score:.6f}')
         # df_tmp = df_feature_importance.groupby('feature').agg('mean').reset_index()
         # df_tmp = df_tmp.sort_values('importance', ascending=False)
         # print(df_tmp[['feature', 'importance']])
@@ -96,10 +103,10 @@ class LightGBMBench(Bench):
 
     def preprocess(self, x, y):
         # label smoothing
-        q = x.isnull().any(axis=1)
-        epsilon = 0.4
-        y[q] *= epsilon
-        y[q] += (1-epsilon)/2
+        # q = x.isnull().any(axis=1)
+        # epsilon = 0.6
+        # y[q] *= epsilon
+        # y[q] += (1-epsilon)/2
         if self.imputer:
             x = self.impute(x)
         return x, y
@@ -162,10 +169,14 @@ class SVMBench(Bench):
         }[imputer]
         self.svm_kernel = svm_kernel
 
-    def _train(self, x_train, y_train, x_valid, y_valid):
-        x_train = self.impute(x_train)
-        x_valid = self.impute(x_valid)
+    def preprocess(self, x, y):
+        # x = pd.DataFrame(self.scaler.fit(x).transform(x))
+        if self.imputer:
+            x = self.impute(x)
+        # x[x.isna()] = -1000
+        return x, y
 
+    def _train(self, x_train, y_train, x_valid, y_valid):
         param_list = [0.001, 0.01, 0.1, 1, 10]
         best_score = 0
         best_parameters = {}
@@ -255,7 +266,7 @@ class NNBench(Bench):
     def preprocess(self, x, y):
         # label smoothing
         q = x.isnull().any(axis=1)
-        epsilon = 0.4
+        epsilon = 0.6
         y[q] *= epsilon
         y[q] += (1-epsilon)/2
 
@@ -311,7 +322,7 @@ class NNBench(Bench):
             output_tensor = model(input_tensor)
             outputs.append(output_tensor)
         outputs = torch.cat(outputs)
-        return outputs.cpu().detach().numpy()
+        return outputs.cpu().detach().numpy().squeeze(-1)
 
     def serialize(self):
         pass

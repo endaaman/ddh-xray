@@ -23,7 +23,6 @@ from utils import XrayBBItem, calc_mean_and_std, label_to_tensor
 col_target = 'treatment'
 # cols_cat = ['sex', 'breech_presentation']
 # cols_val = ['left_alpha', 'right_alpha', 'left_oe', 'right_oe', 'left_a', 'right_a', 'left_b', 'right_b', ]
-
 cols_cat = []
 cols_val = ['sex', 'breech_presentation', 'left_alpha', 'right_alpha', 'left_oe', 'right_oe', 'left_a', 'right_a', 'left_b', 'right_b', ]
 cols_feature = cols_cat + cols_val
