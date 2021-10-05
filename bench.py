@@ -1,7 +1,7 @@
 from tqdm import tqdm
 import pandas as pd
 import numpy as np
-from sklearn.svm import SVC
+from sklearn.svm import SVR
 from sklearn.model_selection import StratifiedKFold, KFold
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer, KNNImputer
@@ -11,12 +11,12 @@ import torch
 from torch import nn, optim
 from torch.utils.data import TensorDataset, DataLoader
 
-from datasets import cols_cat, col_target, cols_feature
+from datasets import cols_cat, col_target, cols_feature, cols_extend
 
 
 class Bench:
-    def __init__(self, use_fold, seed):
-        self.use_fold = use_fold
+    def __init__(self, num_folds, seed):
+        self.num_folds = num_folds
         self.seed = seed
         self.scaler = StandardScaler()
 
@@ -24,26 +24,26 @@ class Bench:
         # return pd.DataFrame(self.imp.fit(x).transform(x), columns=x.columns)
         return self.imputer.fit(x).transform(x)
 
-    def preprocess(self, x, y):
+    def preprocess(self, x, y=None):
         return x, y
 
     def train(self, df_train):
-        if not self.use_fold:
-            x_train = df_train[cols_feature]
-            y_train = df_train[col_target]
-            x_valid = np.array([[]])
-            y_valid = np.array([])
-            model = self._train(x_train, y_train, x_valid, y_valid)
-            self.models = [model]
-            return
+        # if not self.use_fold:
+        #     x_train = df_train[cols_feature]
+        #     y_train = df_train[col_target]
+        #     x_valid = pd.DataFrame(np.array([[]]))
+        #     y_valid = pd.DataFrame(np.array([]))
+        #     model = self._train(x_train, y_train, x_valid, y_valid)
+        #     self.models = [model]
+        #     return
 
-        folds = StratifiedKFold(n_splits=5, shuffle=True, random_state=self.seed)
+        folds = StratifiedKFold(n_splits=self.num_folds, shuffle=True, random_state=self.seed)
         # 各foldターゲットのラベルの分布がそろうようにする = stratified K fold
         folds = folds.split(np.arange(len(df_train)), y=df_train[col_target])
         folds = list(folds)
         models = []
-        for fold in range(5):
-            print(f'fold {fold}/5')
+        for fold in range(self.num_folds):
+            print(f'fold {fold+1}/{self.num_folds}')
             vv = [
                 df_train.iloc[folds[fold][0]][cols_feature], # x_train
                 df_train.iloc[folds[fold][0]][col_target],   # y_train
@@ -52,7 +52,7 @@ class Bench:
             ]
             vv = [v.copy() for v in vv]
             vv[0], vv[1] = self.preprocess(*vv[:2])
-            vv[2], vv[3]  = self.preprocess(*vv[2:])
+            vv[2], vv[3] = self.preprocess(*vv[2:])
             model = self._train(*vv)
             models.append(model)
         self.models = models
@@ -61,10 +61,11 @@ class Bench:
         pass
 
     def predict(self, x):
+        x, _ = self.preprocess(x.copy())
         preds = []
         for model in self.models:
             preds.append(self._predict(model, x.copy()))
-        return np.mean(preds, axis=0)
+        return np.stack(preds, axis=1)
 
     def _predict(self, model, x):
         pass
@@ -101,7 +102,7 @@ class LightGBMBench(Bench):
         # print(df_tmp[['feature', 'importance']])
         # # df_tmp.to_csv('out/importance.csv')
 
-    def preprocess(self, x, y):
+    def preprocess(self, x, y=None):
         # label smoothing
         # q = x.isnull().any(axis=1)
         # epsilon = 0.6
@@ -149,7 +150,8 @@ class LightGBMBench(Bench):
         return model
 
     def _predict(self, model, x):
-        return model.predict(x, num_iteration=model.best_iteration)
+        y = model.predict(x, num_iteration=model.best_iteration)
+        return y
 
     def serialize(self):
         return [m.model_to_string() for m in self.models]
@@ -169,7 +171,7 @@ class SVMBench(Bench):
         }[imputer]
         self.svm_kernel = svm_kernel
 
-    def preprocess(self, x, y):
+    def preprocess(self, x, y=None):
         # x = pd.DataFrame(self.scaler.fit(x).transform(x))
         if self.imputer:
             x = self.impute(x)
@@ -183,7 +185,8 @@ class SVMBench(Bench):
         best_model = None
         for gamma in tqdm(param_list):
             for C in tqdm(param_list, leave=False):
-                model = SVC(kernel=self.svm_kernel, gamma=gamma, C=C, random_state=None)
+                # model = SVC(kernel=self.svm_kernel, gamma=gamma, C=C, random_state=None)
+                model = SVR(kernel=self.svm_kernel, gamma=gamma, C=C)
                 model.fit(x_train, y_train)
                 score = model.score(x_valid, y_valid)
                 if score > best_score:
@@ -200,7 +203,8 @@ class SVMBench(Bench):
 
     def _predict(self, model, x):
         x = self.impute(x)
-        return model.predict(x)
+        y = model.predict(x)
+        return y
 
     def serialize(self):
         pass
@@ -208,16 +212,17 @@ class SVMBench(Bench):
     def restore(self, data):
         pass
 
-class SkipLinear(nn.Module):
-    def __init__(self, a):
+class Dense(nn.Module):
+    def __init__(self, a, b=None):
         super().__init__()
-        self.dense = nn.Linear(a, a)
+        if not b:
+            b = a
+        self.dense = nn.Linear(a, b)
         self.dropout = nn.Dropout()
         self.relu = nn.ReLU()
 
     def forward(self, x):
-        y = self.dense(x)
-        x = x + y
+        x = self.dense(x)
         x = self.dropout(x)
         x = self.relu(x)
         return x
@@ -238,10 +243,12 @@ class NNModel(nn.Module):
         for i, n in enumerate(cfg):
             layers.append(nn.Linear(last_feat, n))
             last_feat = n
-
             if i != len(cfg) - 1:
-                layers.append(nn.Dropout(p=0.2))
-                layers.append(nn.ReLU())
+                layers += [
+                    # nn.BatchNorm1d(n),
+                    nn.Dropout(p=0.2),
+                    nn.ReLU(inplace=True),
+                ]
 
         self.fc = nn.Sequential(*layers)
 
@@ -251,7 +258,7 @@ class NNModel(nn.Module):
 
 
 class NNBench(Bench):
-    def __init__(self, epoch=2000, batch_size=24, device='cpu', *args, **kwargs):
+    def __init__(self, epoch=1000, batch_size=48, device='cpu', *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.epoch = epoch
         self.batch_size = batch_size
@@ -263,15 +270,15 @@ class NNBench(Bench):
             torch.from_numpy(y.values).type(torch.FloatTensor)[:, None])
         return DataLoader(ds, batch_size=self.batch_size)
 
-    def preprocess(self, x, y):
+    def preprocess(self, x, y=None):
         # label smoothing
-        q = x.isnull().any(axis=1)
-        epsilon = 0.6
-        y[q] *= epsilon
-        y[q] += (1-epsilon)/2
-
+        if np.any(y):
+            q = x.isnull().any(axis=1)
+            epsilon = 0.6
+            y[q] *= epsilon
+            y[q] += (1-epsilon)/2
+            # x = pd.DataFrame(self.scaler.fit(x).transform(x))
         x[x.isna()] = -1000
-        y[y.isna()] = -1000
         return x, y
 
     def _train(self, x_train, y_train, x_valid, y_valid):
@@ -280,7 +287,7 @@ class NNBench(Bench):
         valid_loader = self.as_loader(x_valid, y_valid)
 
         optimizer = optim.Adam(model.parameters(), lr=0.001)
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3)
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5)
         criterion = nn.BCELoss()
 
         e = tqdm(range(self.epoch))
@@ -295,7 +302,6 @@ class NNBench(Bench):
                 optimizer.step()
                 losses.append(loss.item())
             train_loss = np.mean(losses)
-            scheduler.step(train_loss)
             model.eval()
             losses = []
             with torch.no_grad():
@@ -304,7 +310,7 @@ class NNBench(Bench):
                     loss = criterion(z, y)
                     losses.append(loss.item())
             valid_loss = np.mean(losses)
-
+            scheduler.step(valid_loss)
             lr = optimizer.param_groups[0]['lr']
             if lr < 0.0000001:
                 break
@@ -314,7 +320,7 @@ class NNBench(Bench):
         return model
 
     def _predict(self, model, x):
-        x[x.isna()] = -1000
+        # x[x.isna()] = -1000
         outputs = []
         for start in tqdm(range(0, len(x), self.batch_size)):
             batch = x[start:start + self.batch_size]
@@ -322,7 +328,8 @@ class NNBench(Bench):
             output_tensor = model(input_tensor)
             outputs.append(output_tensor)
         outputs = torch.cat(outputs)
-        return outputs.cpu().detach().numpy().squeeze(-1)
+        y = outputs.cpu().detach().numpy().squeeze(-1)
+        return y
 
     def serialize(self):
         pass

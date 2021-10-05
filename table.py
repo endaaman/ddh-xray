@@ -4,19 +4,20 @@ import copy
 from PIL import Image
 import numpy as np
 from matplotlib import pyplot as plt
+import seaborn as sns
 import torch
 import torch.nn as nn
 import pandas as pd
 from tqdm import tqdm
 
-from sklearn.model_selection import StratifiedKFold, KFold
 from sklearn import metrics
+from sklearn.model_selection import StratifiedKFold, KFold, train_test_split
+from sklearn.linear_model import LogisticRegression, LinearRegression
 import optuna
-from sklearn.model_selection import train_test_split
 
 from endaaman import Commander
 from bench import SVMBench, LightGBMBench, NNBench
-from datasets import cols_cat, col_target, cols_feature
+from datasets import cols_cat, col_target, cols_feature, cols_extend
 
 
 optuna.logging.disable_default_handler()
@@ -48,15 +49,20 @@ class Table(Commander):
         df_train = pd.concat([df_train, df_measure_train], axis=1)
         df_test = pd.concat([df_test, df_measure_test], axis=1)
 
+        # self.meta_model = LogisticRegression()
+        self.meta_model = LinearRegression()
+
         self.df_all = pd.concat([df_train, df_test])
         # self.df_all.loc[:, cols_cat]= self.df_all[cols_cat].astype('category')
 
+        for col, fn in cols_extend.items():
+            self.df_all[col] = fn(self.df_all)
+
         if self.args.test_ratio:
-            df_train, df_test = train_test_split(self.df_all, test_size=self.args.test_ratio, random_state=self.args.seed)
-            # df_train.loc[:, 'test'] = 0
-            # df_test.loc[:, 'test'] = 1
-        self.df_train = df_train
-        self.df_test = df_test
+            self.df_train, self.df_test = train_test_split(self.df_all, test_size=self.args.test_ratio, random_state=self.args.seed)
+        else:
+            self.df_train = self.df_all[self.df_all['test'] == 0]
+            self.df_test = self.df_all[self.df_all['test'] == 1]
 
     def run_demo(self):
         print(len(self.df_test))
@@ -65,30 +71,31 @@ class Table(Commander):
     def create_benchs_by_args(self, args):
         t = {
             'gbm': lambda: LightGBMBench(
-                use_fold=not args.no_fold,
+                num_folds=args.folds,
                 seed=args.seed,
                 imputer=args.imputer,
                 use_optuna=args.optuna),
             'svm': lambda: SVMBench(
-                use_fold=not args.no_fold,
+                num_folds=args.folds,
                 seed=args.seed,
                 imputer=args.imputer,
                 svm_kernel=args.kernel,
             ),
             'nn': lambda: NNBench(
-                use_fold=not args.no_fold,
+                num_folds=args.folds,
                 seed=args.seed,
-                epoch=100,
+                epoch=200,
             ),
         }
         return [t[m]() for m in args.model]
 
     def arg_train(self, parser):
         parser.add_argument('--roc', action='store_true')
-        parser.add_argument('--no-fold', action='store_true')
+        parser.add_argument('--folds', type=int, default=5)
         parser.add_argument('-i', '--imputer')
         parser.add_argument('-m', '--model', default='gbm', nargs='+', choices=['gbm', 'svm', 'nn'])
         parser.add_argument('-k', '--kernel', default='rbf')
+        parser.add_argument('-g', '--gather', default='mean', choices=['mean', 'median', 'reg'])
 
     def run_train(self):
         benchs = self.create_benchs_by_args(self.args)
@@ -106,6 +113,13 @@ class Table(Commander):
         torch.save(checkpoint, p)
         print(f'wrote {p}')
 
+
+        # train meta model
+        x_train = self.df_train[cols_feature]
+        y_train = self.df_train[col_target]
+        preds_train = np.concatenate([b.predict(x_train) for b in benchs], axis=1)
+        self.meta_model.fit(preds_train, y_train)
+
         if self.args.roc:
             self.draw_roc(benchs)
 
@@ -115,15 +129,25 @@ class Table(Commander):
         x_test = self.df_test[cols_feature]
         y_test = self.df_test[col_target]
 
-        preds_train = [b.predict(x_train) for b in benchs]
-        preds_test = [b.predict(x_test) for b in benchs]
-        pred_train = np.mean(preds_train, axis=0)
-        pred_test = np.mean(preds_test, axis=0)
+        preds_train = np.concatenate([b.predict(x_train) for b in benchs], axis=1)
+        preds_test = np.concatenate([b.predict(x_test) for b in benchs], axis=1)
+        if self.args.gather == 'mean':
+            pred_train = np.mean(preds_train, axis=1)
+            pred_test = np.mean(preds_test, axis=1)
+        elif self.args.gather == 'median':
+            pred_train = np.median(preds_train, axis=1)
+            pred_test = np.median(preds_test, axis=1)
+        elif self.args.gather == 'reg':
+            print('reg')
+            pred_train = self.meta_model.predict(preds_train)
+            pred_test = self.meta_model.predict(preds_test)
+        else:
+            raise RuntimeError(f'Invalid gather rule: {self.args.gather}')
 
         for (t, y, pred) in (('train', y_train, pred_train), ('test', y_test, pred_test)):
             fpr, tpr, thresholds = metrics.roc_curve(y, pred)
             auc = metrics.auc(fpr, tpr)
-            plt.plot(fpr, tpr, label=f'{t} auc = {auc:.2f})')
+            plt.plot(fpr, tpr, label=f'{t} auc = {auc:.2f}')
 
         plt.legend()
         plt.title('ROC curve')
@@ -144,6 +168,17 @@ class Table(Commander):
         bench = self.create_bench_by_args(args)
         bench.restore(checkpoint['model_data'])
         self.draw_roc(bench)
+
+    def run_visualize(self):
+        fig, axes = plt.subplots(nrows=2, ncols=4, figsize=(20, 10))
+        fig.suptitle('violin')
+        for i, col in enumerate(['left_alpha', 'right_alpha', 'left_oe', 'right_oe', 'left_a', 'right_a', 'left_b', 'right_b']):
+            ax = axes[i//4][i%4]
+            ax.set_title(col)
+            # sns.violinplot(x='sex', y=col, hue='treatment', data=self.df_train, split=True, ax=ax)
+            sns.violinplot(y=col, x='treatment', hue='sex', data=self.df_train, split=True, ax=ax)
+        plt.show()
+
 
 
 Table().run()
