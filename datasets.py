@@ -16,6 +16,7 @@ from matplotlib import pyplot as plt
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
+import albumentations as A
 
 from utils import XrayBBItem, calc_mean_and_std, label_to_tensor
 
@@ -160,8 +161,19 @@ class ROIDataset(BaseDataset):
         return self.transform(x, y)
 
 if __name__ == '__main__':
-    from augmentation import Augmentation, ResizeAugmentation
+
+    transform = A.Compose([
+        A.RandomCrop(width=256, height=256),
+        A.HorizontalFlip(p=0.5),
+        A.RandomBrightnessContrast(p=0.2),
+    ])
+
     ds = ROIDataset()
+    for i, (x, y) in enumerate(ds):
+        print(i)
+        if i > 10:
+            break
+
 
     # t_x = transforms.Compose([
     #     transforms.ToTensor(),
@@ -173,6 +185,3 @@ if __name__ == '__main__':
     # loader = DataLoader(ds, batch_size=3, num_workers=1)
     # for i, (x, y) in enumerate(loader):
     #     print(i)
-
-    for i, (x, y) in enumerate(ds):
-        x.save(f'tmp/{i}_{y}.png')

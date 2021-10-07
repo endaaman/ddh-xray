@@ -5,8 +5,9 @@ from sklearn.svm import SVR
 from sklearn.model_selection import StratifiedKFold, KFold
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer, KNNImputer
-import optuna.integration.lightgbm as opt_lgb
 import lightgbm as org_lgb
+import optuna.integration.lightgbm as opt_lgb
+import xgboost as xgb
 import torch
 from torch import nn, optim
 from torch.utils.data import TensorDataset, DataLoader
@@ -91,7 +92,6 @@ class LightGBMBench(Bench):
 
     def train(self, df_train):
         super().train(df_train)
-
         # preds_valid = np.zeros([len(self.df_train)], np.float32)
         # preds_test = np.zeros([5, len(self.df_test)], np.float32)
         # df_feature_importance = pd.DataFrame()
@@ -160,6 +160,59 @@ class LightGBMBench(Bench):
         self.models = []
         for m in data:
             self.models.append(self.lgb.Booster(model_str=m))
+
+
+class XGBBench(Bench):
+    def __init__(self, imputer=None, use_optuna=False, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if imputer:
+            self.imputer = {
+                'simple': SimpleImputer(missing_values=np.nan, strategy='median'),
+                'knn': KNNImputer(n_neighbors=5),
+            }[imputer]
+        else:
+            self.imputer = None
+
+    def preprocess(self, x, y=None):
+        # label smoothing
+        # q = x.isnull().any(axis=1)
+        # epsilon = 0.6
+        # y[q] *= epsilon
+        # y[q] += (1-epsilon)/2
+        if self.imputer:
+            x = self.impute(x)
+        return x, y
+
+    def _train(self, x_train, y_train, x_valid, y_valid):
+        dtrain = xgb.DMatrix(x_train, label=y_train)
+        dtest = xgb.DMatrix(x_valid, label=y_valid)
+
+        params = {
+            'objective': 'binary:logistic',
+            'eval_metric': 'auc',
+        }
+
+        # model = xgb.train(xgb_params, dtrain, num_boost_round=100)
+        evals_result = {}
+        model = xgb.train(
+            params,
+            dtrain,
+            num_boost_round=100,
+            evals=[(dtest, 'eval'),(dtrain, 'train')],
+            evals_result=evals_result,
+            early_stopping_rounds=10,
+        )
+
+        return model
+
+    def _predict(self, model, x):
+        return model.predict(xgb.DMatrix(x))
+
+    def serialize(self):
+        pass
+
+    def restore(self, data):
+        pass
 
 class SVMBench(Bench):
     def __init__(self, imputer='simple', svm_kernel='rbf', *args, **kwargs):

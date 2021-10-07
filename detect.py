@@ -14,7 +14,7 @@ from effdet import EfficientDet, DetBenchTrain, get_efficientdet_config
 from augmentation import Augmentation, ResizeAugmentation, CropAugmentation
 from datasets import XrayDataset
 from utils import get_state_dict
-from endaaman import Trainer
+from endaaman import TorchCommander
 
 
 def label_to_tensor(label, device):
@@ -29,7 +29,7 @@ SIZE_BY_NETWORK= {
     'd1': 640,
 }
 
-class MyTrainer(Trainer):
+class MyTrainer(TorchCommander):
     def run_check(self, args):
         # model = self.create_model(self.args.network)
         cfg = get_efficientdet_config(f'tf_efficientdet_{self.args.network}')

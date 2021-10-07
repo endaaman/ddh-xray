@@ -16,7 +16,7 @@ from sklearn.linear_model import LogisticRegression, LinearRegression
 import optuna
 
 from endaaman import Commander
-from bench import SVMBench, LightGBMBench, NNBench
+from bench import LightGBMBench, XGBBench, SVMBench, NNBench
 from datasets import cols_cat, col_target, cols_feature, cols_extend
 
 
@@ -75,6 +75,11 @@ class Table(Commander):
                 seed=args.seed,
                 imputer=args.imputer,
                 use_optuna=args.optuna),
+            'xgb': lambda: XGBBench(
+                num_folds=args.folds,
+                seed=args.seed,
+                imputer=args.imputer,
+            ),
             'svm': lambda: SVMBench(
                 num_folds=args.folds,
                 seed=args.seed,
@@ -93,9 +98,16 @@ class Table(Commander):
         parser.add_argument('--roc', action='store_true')
         parser.add_argument('--folds', type=int, default=5)
         parser.add_argument('-i', '--imputer')
-        parser.add_argument('-m', '--model', default='gbm', nargs='+', choices=['gbm', 'svm', 'nn'])
+        parser.add_argument('-m', '--model', default='gbm', nargs='+', choices=['gbm', 'xgb', 'svm', 'nn'])
         parser.add_argument('-k', '--kernel', default='rbf')
-        parser.add_argument('-g', '--gather', default='mean', choices=['mean', 'median', 'reg'])
+        parser.add_argument('-g', '--gather', default='median', choices=['mean', 'median', 'reg'])
+        parser.add_argument('-b', '--mean-by-bench', action='store_true')
+
+    def predict_benchs(self, benchs, x):
+        if self.args.mean_by_bench:
+            return np.stack([np.mean(b.predict(x), axis=1) for b in benchs], axis=1)
+        else:
+            return np.concatenate([b.predict(x) for b in benchs], axis=1)
 
     def run_train(self):
         benchs = self.create_benchs_by_args(self.args)
@@ -117,7 +129,7 @@ class Table(Commander):
         # train meta model
         x_train = self.df_train[cols_feature]
         y_train = self.df_train[col_target]
-        preds_train = np.concatenate([b.predict(x_train) for b in benchs], axis=1)
+        preds_train = self.predict_benchs(benchs, x_train)
         self.meta_model.fit(preds_train, y_train)
 
         if self.args.roc:
@@ -129,8 +141,9 @@ class Table(Commander):
         x_test = self.df_test[cols_feature]
         y_test = self.df_test[col_target]
 
-        preds_train = np.concatenate([b.predict(x_train) for b in benchs], axis=1)
-        preds_test = np.concatenate([b.predict(x_test) for b in benchs], axis=1)
+        preds_train = self.predict_benchs(benchs, x_train)
+        preds_test = self.predict_benchs(benchs, x_test)
+
         if self.args.gather == 'mean':
             pred_train = np.mean(preds_train, axis=1)
             pred_test = np.mean(preds_test, axis=1)
@@ -138,7 +151,6 @@ class Table(Commander):
             pred_train = np.median(preds_train, axis=1)
             pred_test = np.median(preds_test, axis=1)
         elif self.args.gather == 'reg':
-            print('reg')
             pred_train = self.meta_model.predict(preds_train)
             pred_test = self.meta_model.predict(preds_test)
         else:

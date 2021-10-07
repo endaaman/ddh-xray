@@ -10,6 +10,7 @@ import torch
 import torchvision
 from PIL import Image, ImageDraw, ImageOps, ImageEnhance
 from matplotlib import pyplot as plt
+import albumentations as A
 
 from datasets import XrayDataset
 from utils import pil_to_tensor, tensor_to_pil
@@ -186,28 +187,4 @@ class CropAugmentation():
         return img, label
 
 if __name__ == '__main__':
-    ds = XrayDataset()
-    ds.set_augmentaion(Augmentation(tile_size=512, level_range=(0.0, 0.2), scale_range=(1.0, 1.2)))
-    # ds.set_augmentaion(CropAugmentation(tile_size=512))
-
-    for i, (image, label) in enumerate(ds):
-        draw = ImageDraw.Draw(image)
-
-        for _i, row in label.iterrows():
-            x0, y0, x1, y1, id = row
-            if id < 0 or id > 5:
-                print(i, 'id', id)
-                print(ds.items[i].image_path)
-            # if x0 < 0:
-            #     print(i, 'x0', x0)
-            # if y0 < 0:
-            #     print(i, 'y0', y0)
-            # if x1 > IMAGE_SIZE:
-            #     print(i, 'x1', x1)
-            # if y1 > IMAGE_SIZE:
-            #     print(i, 'y1', y1)
-            draw.rectangle(((x0, y0), (x1, y1)), outline='yellow', width=1)
-
-        image.save(f'tmp/{i}.jpg')
-        if i > 5:
-            break
+    pass
