@@ -8,12 +8,13 @@ import torch
 import torch.optim as optim
 from torchvision import transforms
 from torch.utils.data import DataLoader
-
+import albumentations as A
 # from effdet import EfficientDet, FocalLoss, EFFDET_PARAMS
 from effdet import EfficientDet, DetBenchTrain, get_efficientdet_config
-from augmentation import Augmentation, ResizeAugmentation, CropAugmentation
-from datasets import XrayDataset
+# from augmentation import Augmentation, ResizeAugmentation, CropAugmentation
+from datasets import XRBBDataset
 from utils import get_state_dict
+
 from endaaman import TorchCommander
 
 
@@ -91,23 +92,28 @@ class MyTrainer(TorchCommander):
         return model
 
     def create_loaders(self):
-        train_dataset = XrayDataset()
+        train_dataset = XRBBDataset()
         transform_x = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize(*[[v] * 3 for v in train_dataset.get_mean_and_std()]),
-            lambda x: x.permute([0, 2, 1]),
+            # lambda x: x.permute([0, 2, 1]),
         ])
         transform_y = transforms.Compose([
-            lambda y: label_to_tensor(y, self.device),
+            lambda y: {
+                'bbox': torch.FloatTensor(y[:, :4]),
+                'cls': torch.FloatTensor(y[:, 4]),
+            },
         ])
         train_dataset.set_transforms(transform_x, transform_y)
         tile_size = SIZE_BY_NETWORK[self.args.network]
         if self.args.no_aug:
-            aug = ResizeAugmentation(tile_size=tile_size)
-            # aug = CropAugmentation(tile_size=tile_size)
+            pass
         else:
-            aug = Augmentation(tile_size=tile_size)
-        train_dataset.set_augmentaion(aug)
+            train_dataset.set_albu(A.Compose([
+                A.RandomCrop(width=512, height=512),
+                A.HorizontalFlip(p=0.5),
+                A.RandomBrightnessContrast(p=0.2),
+            ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels'])))
 
         train_loader = DataLoader(
             train_dataset,
@@ -142,10 +148,10 @@ class MyTrainer(TorchCommander):
 
         return {k: np.mean(v) for k, v in metrics.items()}
 
-    def arg_yolo(self, parser):
+    def arg_train(self, parser):
         pass
 
-    def run_yolo(self):
+    def run_train(self):
         model = self.create_model(self.args.network)
         bench = DetBenchTrain(model).to(self.device)
 

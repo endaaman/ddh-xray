@@ -1,11 +1,12 @@
+from typing import Union, Optional, List, Tuple, Text, BinaryIO
 import os
-from typing import List
 
 import torch
 from PIL import Image
 import numpy as np
 import pandas as pd
 from torchvision import transforms
+from torchvision.utils import draw_bounding_boxes
 from recordclass import recordclass, RecordClass
 
 
@@ -47,6 +48,12 @@ def read_label(path):
             class_id,
         ])
     return pd.DataFrame(columns=cols, data=data)
+
+def draw_bb(img:Image, bb:np.ndarray, labels:List[str]=None):
+    # img = torch.from_numpy(x).permute(2, 0, 1)
+    img = (pil_to_tensor(img) * 255).type(torch.uint8)
+    t = draw_bounding_boxes(image=img, boxes=torch.from_numpy(bb), labels=labels)
+    return tensor_to_pil(t)
 
 def get_state_dict(model):
     if type(model) == torch.nn.DataParallel:
