@@ -186,17 +186,36 @@ class ROICroppedDataset(Dataset):
 
 if __name__ == '__main__':
     transform = A.Compose([
-        A.RandomCrop(width=400, height=400),
+        # A.RandomCrop(width=100, height=100),
+        A.RandomResizedCrop(width=512, height=512, scale=[2.0, 1.0]),
         A.HorizontalFlip(p=0.5),
-        A.RandomBrightnessContrast(p=0.2),
+        # A.Flip(),
+        # A.Transpose(),
+        A.GaussNoise(p=0.2),
+        A.OneOf([
+            A.MotionBlur(p=.2),
+            A.MedianBlur(blur_limit=3, p=0.1),
+            A.Blur(blur_limit=3, p=0.1),
+        ], p=0.2),
+        A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.2, rotate_limit=5, p=0.5),
+        A.PiecewiseAffine(p=0.2),
+        A.OneOf([
+            A.CLAHE(clip_limit=2),
+            A.Emboss(),
+            A.RandomBrightnessContrast(),
+        ], p=0.3),
+        A.HueSaturationValue(p=0.3),
     ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']))
 
     ds = XRBBDataset()
     ds.set_albu(transform)
     for i, (x, y) in enumerate(ds):
-        img = draw_bb(x, y[:, :4], [str(v) for v in y[:, 4]])
+        if len(y.shape) > 1:
+            img = draw_bb(x, y[:, :4], [str(v) for v in y[:, 4]])
+        else:
+            img = x
         img.save(f'tmp/{i}.png')
-        if i > 10:
+        if i > 20:
             break
 
 
