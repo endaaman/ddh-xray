@@ -12,7 +12,7 @@ from PIL import Image, ImageDraw, ImageOps, ImageEnhance
 from matplotlib import pyplot as plt
 import albumentations as A
 
-from datasets import XrayDataset
+# from datasets import XrayDataset
 from utils import pil_to_tensor, tensor_to_pil
 
 
