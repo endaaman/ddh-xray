@@ -1,6 +1,7 @@
 import os
 import re
 import glob
+import warnings
 import math
 import time
 import functools
@@ -16,7 +17,9 @@ from matplotlib import pyplot as plt
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
+from torchvision.utils import draw_bounding_boxes
 import albumentations as A
+from albumentations.pytorch.transforms import ToTensorV2, ToTensor
 
 from utils import XrayBBItem, calc_mean_and_std, label_to_tensor, draw_bb, tensor_to_pil
 
@@ -55,7 +58,7 @@ def read_label(path):
         class_id = int(parted[0])
         # convert from yolo to pascal voc
         center_x, center_y, w, h = [float(v) * IMAGE_SIZE for v in parted[1:]]
-        class_id = class_id % 3
+        # class_id = class_id % 3
         data.append([
             center_x - w / 2,
             center_y - h / 2,
@@ -84,17 +87,17 @@ def pad_to_fixed_size(img, size=(256, 128), bg=(0,0,0)):
 
 
 class XRBBDataset(Dataset):
-    def __init__(self, is_training=True, transform_x=None, transform_y=None):
-        self.set_transforms(transform_x, transform_y)
+    def __init__(self, is_training=True, use_yxyx=True, normalized=True):
         self.augmentation = None
         self.is_training = is_training
+        self.use_yxyx = use_yxyx
+        self.normalized = normalized
         self.items = self.load_items()
+        self.apply_augs([])
+        self.horizontal_filpper_index = None
 
     def get_mean_and_std(self):
         return calc_mean_and_std([item.image for item in self.items])
-
-    def get_normalizer(self):
-        return transforms.Normalize(*[[v] * 3 for v in self.get_mean_and_std()])
 
     def load_items(self):
         if self.is_training:
@@ -121,43 +124,49 @@ class XRBBDataset(Dataset):
         print('All images loaded')
         return items
 
-    def set_albu(self, albu):
-        self.albu = albu
+    def apply_augs(self, augs):
+        self.albu = A.ReplayCompose([
+            *augs,
+            A.Normalize(*[[v] * 3 for v in self.get_mean_and_std()]) if self.normalized else None,
+            ToTensorV2(),
+        ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']))
 
-    def set_transforms(self, transform_x, transform_y):
-        self._transform_x = transform_x
-        self._transform_y = transform_y
-
-    def transform_x(self, x):
-        if self._transform_x:
-            return self._transform_x(x)
-        else:
-            return x
-
-    def transform_y(self, y):
-        if self._transform_y:
-            return self._transform_y(y)
-        else:
-            return y
-
-    def transform(self, x, y):
-        return self.transform_x(x), self.transform_y(y)
+        self.horizontal_filpper_index = None
+        for i, t in enumerate(self.albu):
+            if isinstance(t, A.HorizontalFlip):
+                self.horizontal_filpper_index = i
 
     def __len__(self):
         return len(self.items)
 
     def __getitem__(self, idx):
         item = self.items[idx]
-        if self.albu:
-            auged = self.albu(
-                image=np.array(item.image),
-                bboxes=item.bb.values,
-                labels=np.zeros(item.bb.shape[0]),
+
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            result = self.albu(
+                image=np.array(item.image.copy()),
+                bboxes=item.bb.values[:, :4],
+                labels=item.bb.values[:, 4],
             )
-            x, y = Image.fromarray(auged['image']), np.array(auged['bboxes'])
-        else:
-            x, y = item.image, item.bb.values
-        return self.transform(x, y)
+        warnings.resetwarnings()
+        x = result['image']
+        boxes = np.array(result['bboxes'])
+        labels = np.array(result['labels'])
+
+        if self.horizontal_filpper_index is not None:
+            flipped = result['replay']['transforms'][self.horizontal_filpper_index]['applied']
+            if flipped:
+                labels -= 3
+                labels[labels < 0] += 6
+
+        if self.use_yxyx:
+            boxes = boxes[:, [1, 0, 3, 2]]
+        y = {
+            'bbox': torch.FloatTensor(boxes),
+            'cls': torch.FloatTensor(labels),
+        }
+        return x, y
 
 
 class ROICroppedDataset(Dataset):
@@ -184,13 +193,36 @@ class ROICroppedDataset(Dataset):
         #     x = ImageOps.invert(x)
         return self.transform(x, y)
 
+
+def test_flip():
+    a = A.ReplayCompose([
+        A.HorizontalFlip(p=0.5)
+    ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']))
+
+    img = np.ones([30, 30, 3])
+    label = np.array([
+        [5, 5, 6, 6, 1]
+    ])
+
+    r = a(
+        image=img,
+        bboxes=label[:, :4],
+        labels=label[:, 4],
+    )
+    for t in r['replay']['transforms']:
+        print(t['applied'])
+
+    print(r['bboxes'])
+    print(r['labels'])
+
 if __name__ == '__main__':
-    transform = A.Compose([
+    # test_flip()
+    # exit(0)
+
+    augs = [
         # A.RandomCrop(width=100, height=100),
         A.RandomResizedCrop(width=512, height=512, scale=[2.0, 1.0]),
         A.HorizontalFlip(p=0.5),
-        # A.Flip(),
-        # A.Transpose(),
         A.GaussNoise(p=0.2),
         A.OneOf([
             A.MotionBlur(p=.2),
@@ -198,34 +230,27 @@ if __name__ == '__main__':
             A.Blur(blur_limit=3, p=0.1),
         ], p=0.2),
         A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.2, rotate_limit=5, p=0.5),
-        A.PiecewiseAffine(p=0.2),
+        # A.PiecewiseAffine(p=0.2),
         A.OneOf([
             A.CLAHE(clip_limit=2),
             A.Emboss(),
             A.RandomBrightnessContrast(),
         ], p=0.3),
         A.HueSaturationValue(p=0.3),
-    ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']))
+    ]
 
-    ds = XRBBDataset()
-    ds.set_albu(transform)
+    ds = XRBBDataset(use_yxyx=False, normalized=False)
+    ds.apply_augs(augs)
+    # for i, (x, y) in enumerate(ds):
+    #     print(y)
+    #     break
+    #     if i > 20:
+    #         break
+
     for i, (x, y) in enumerate(ds):
-        if len(y.shape) > 1:
-            img = draw_bb(x, y[:, :4], [str(v) for v in y[:, 4]])
-        else:
-            img = x
+        t = draw_bounding_boxes(image=x, boxes=y['bbox'], labels=[str(v.item()) for v in y['cls']])
+        # img = draw_bb(tensor_to_pil(x), y['bbox'], [str(v) for v in y['cls']])
+        img = tensor_to_pil(t)
         img.save(f'tmp/{i}.png')
         if i > 20:
             break
-
-
-    # t_x = transforms.Compose([
-    #     transforms.ToTensor(),
-    #     # ds.get_normalizer(),
-    #     # lambda x: x.permute([0, 2, 1]),
-    # ])
-    # t_y = lambda y: torch.tensor(y, dtype=torch.float32)
-    # ds.set_transforms(t_x, t_y)
-    # loader = DataLoader(ds, batch_size=3, num_workers=1)
-    # for i, (x, y) in enumerate(loader):
-    #     print(i)

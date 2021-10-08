@@ -8,26 +8,38 @@ import torch
 import torch.optim as optim
 from torchvision import transforms
 from torch.utils.data import DataLoader
-
-from utils import pil_to_tensor
-# from effdet import EfficientDet, FocalLoss, EFFDET_PARAMS
 from effdet import EfficientDet, DetBenchPredict, get_efficientdet_config
+from effdet.efficientdet import HeadNet
+
 from augmentation import ResizeAugmentation
-from datasets import XrayDataset
-from endaaman import Trainer
+# from datasets import XrayDataset
+from utils import pil_to_tensor
+
+from endaaman import TorchCommander
 
 
-class MyEval(Trainer):
+class Predictor(TorchCommander):
     def create_model(self, network):
         cfg = get_efficientdet_config(f'tf_efficientdet_{network}')
         cfg.num_classes = 6
-        model = EfficientDet(cfg)
+        model = EfficientDet(cfg, pretrained_backbone=True)
+        # model.class_net = HeadNet(cfg, num_outputs=cfg.num_classes)
         return model
+
+    def run_test(self):
+        model = self.create_model('d0')
+        bench = DetBenchPredict(model)
+        images = torch.randn(2, 3, 512, 512)
+        results = bench(images)
+
+        preds_boxes = preds_boxes.type(torch.LongTensor)
+        # print(preds_boxes)
+        # print(results.shape)
 
     def arg_single(self, parser):
         parser.add_argument('-w', '--weights', type=str, required=True)
-        parser.add_argument('-s', '--src', type=str, required=True)
-        parser.add_argument('-d', '--dest', type=str, default='out')
+        parser.add_argument('-i', '--input', type=str, required=True)
+        parser.add_argument('-o', '--output-dir', type=str, default='tmp')
 
     def run_single(self):
         state = torch.load(self.args.weights, map_location=lambda storage, loc: storage)
@@ -35,8 +47,8 @@ class MyEval(Trainer):
         model.load_state_dict(state['state_dict'])
         bench = DetBenchPredict(model).to(self.device)
 
-        img_size = 640
-        img = Image.open(self.args.src)
+        img_size = 512
+        img = Image.open(self.args.input)
         img = img.resize((img_size, img_size))
         img_tensor = pil_to_tensor(img)
         # img_tensor = img_tensor.permute([0, 2, 1])
@@ -44,6 +56,8 @@ class MyEval(Trainer):
 
         results = bench(img_tensor.to(self.device))
         results = results.type(torch.long)
+        print('results', results.shape)
+        return
 
         bboxes = []
         bbox_scores = []
@@ -64,4 +78,4 @@ class MyEval(Trainer):
         os.system(f'xdg-open {dest_path}')
 
 
-MyEval().run()
+Predictor().run()

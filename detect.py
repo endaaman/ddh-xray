@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 import albumentations as A
 # from effdet import EfficientDet, FocalLoss, EFFDET_PARAMS
 from effdet import EfficientDet, DetBenchTrain, get_efficientdet_config
+from effdet.efficientdet import HeadNet
 # from augmentation import Augmentation, ResizeAugmentation, CropAugmentation
 from datasets import XRBBDataset
 from utils import get_state_dict
@@ -36,7 +37,6 @@ class MyTrainer(TorchCommander):
         cfg = get_efficientdet_config(f'tf_efficientdet_{self.args.network}')
         model = EfficientDet(cfg)
         bench = DetBenchTrain(model)
-
         images = torch.randn(2, 3, 512, 512)
         # labels = torch.ones(2, 2, 5, dtype=torch.float)
         targets = {
@@ -73,22 +73,26 @@ class MyTrainer(TorchCommander):
         parser.add_argument('--no-aug', action='store_true')
         parser.add_argument('--workers', type=int, default=os.cpu_count()//2)
 
-    def save_state(self, model, epoch):
+    def save_weights(self, model, epoch):
         state = {
             'epoch': epoch,
             'args': self.args,
             'state_dict': get_state_dict(model),
         }
-        weights_dir = f'weights/{self.args.network}'
+        weights_dir = f'weights'
         os.makedirs(weights_dir, exist_ok=True)
-        weights_path = os.path.join(weights_dir, f'{epoch}.pth')
+        weights_path = os.path.join(weights_dir, f'{self.args.network}_{epoch}.pth')
         torch.save(state, weights_path)
         return weights_path
 
     def create_model(self, network):
         cfg = get_efficientdet_config(f'tf_efficientdet_{network}')
-        cfg.num_classes = 6
+        cfg.num_classes = 3
         model = EfficientDet(cfg)
+        # model.class_net = HeadNet(
+        #     config,
+        #     num_outputs=config.num_outputs,
+        # )
         return model
 
     def create_loaders(self):
@@ -100,7 +104,8 @@ class MyTrainer(TorchCommander):
         ])
         transform_y = transforms.Compose([
             lambda y: {
-                'bbox': torch.FloatTensor(y[:, :4]),
+                # xyxy -> yxyx
+                'bbox': torch.FloatTensor(y[:, :4][:, [1, 0, 3, 2]]),
                 'cls': torch.FloatTensor(y[:, 4]),
             },
         ])
@@ -184,12 +189,17 @@ class MyTrainer(TorchCommander):
 
             #* save weights
             if epoch % 10 == 0:
-                weights_path = self.save_state(bench.model, epoch)
+                weights_path = self.save_weights(bench.model, epoch)
                 print(f'{header}Saved "{weights_path}"')
 
             scheduler.step(train_metrics['loss'])
             # scheduler.step()
             print()
+
+    def run_fake_weights(self):
+        model = self.create_model(self.args.network)
+        weights_path = self.save_weights(model, 0)
+        print(weights_path)
 
 
 MyTrainer().run()
