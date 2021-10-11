@@ -32,7 +32,9 @@ SIZE_BY_NETWORK= {
 }
 
 class MyTrainer(TorchCommander):
-    def run_check(self, args):
+    def run_check(self):
+        print(self.device)
+        return
         # model = self.create_model(self.args.network)
         cfg = get_efficientdet_config(f'tf_efficientdet_{self.args.network}')
         model = EfficientDet(cfg)
@@ -79,15 +81,15 @@ class MyTrainer(TorchCommander):
             'args': self.args,
             'state_dict': get_state_dict(model),
         }
-        weights_dir = f'weights'
+        weights_dir = f'weights/{self.args.network}'
         os.makedirs(weights_dir, exist_ok=True)
-        weights_path = os.path.join(weights_dir, f'{self.args.network}_{epoch}.pth')
+        weights_path = os.path.join(weights_dir, f'{epoch}.pth')
         torch.save(state, weights_path)
         return weights_path
 
     def create_model(self, network):
         cfg = get_efficientdet_config(f'tf_efficientdet_{network}')
-        cfg.num_classes = 3
+        cfg.num_classes = 6
         model = EfficientDet(cfg)
         # model.class_net = HeadNet(
         #     config,
@@ -96,28 +98,30 @@ class MyTrainer(TorchCommander):
         return model
 
     def create_loaders(self):
-        train_dataset = XRBBDataset()
-        transform_x = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize(*[[v] * 3 for v in train_dataset.get_mean_and_std()]),
-            # lambda x: x.permute([0, 2, 1]),
-        ])
-        transform_y = transforms.Compose([
-            lambda y: {
-                # xyxy -> yxyx
-                'bbox': torch.FloatTensor(y[:, :4][:, [1, 0, 3, 2]]),
-                'cls': torch.FloatTensor(y[:, 4]),
-            },
-        ])
-        train_dataset.set_transforms(transform_x, transform_y)
-        tile_size = SIZE_BY_NETWORK[self.args.network]
+        train_dataset = XRBBDataset(use_yxyx=True)
+        tile_size = SIZE_BY_NETWORK.get(self.args.network, 512)
+        print(tile_size)
         if self.args.no_aug:
             pass
         else:
-            train_dataset.set_albu(A.Compose([
-                A.RandomCrop(width=512, height=512),
-                A.HorizontalFlip(p=0.5),
-                A.RandomBrightnessContrast(p=0.2),
+            train_dataset.apply_augs(A.Compose([
+                # A.RandomCrop(width=100, height=100),
+                A.RandomResizedCrop(width=tile_size, height=tile_size, scale=[0.7, 1.0]),
+                # A.HorizontalFlip(p=0.5),
+                A.GaussNoise(p=0.2),
+                A.OneOf([
+                    A.MotionBlur(p=.2),
+                    A.MedianBlur(blur_limit=3, p=0.1),
+                    A.Blur(blur_limit=3, p=0.1),
+                ], p=0.2),
+                A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.2, rotate_limit=5, p=0.5),
+                # A.PiecewiseAffine(p=0.2),
+                A.OneOf([
+                    A.CLAHE(clip_limit=2),
+                    A.Emboss(),
+                    A.RandomBrightnessContrast(),
+                ], p=0.3),
+                A.HueSaturationValue(p=0.3),
             ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels'])))
 
         train_loader = DataLoader(
@@ -136,9 +140,12 @@ class MyTrainer(TorchCommander):
             inputs = inputs.to(self.device)
             targets['bbox'] = targets['bbox'].to(self.device)
             targets['cls'] = targets['cls'].to(self.device)
+            # print(inputs.shape)
+            # print(targets['cls'].shape)
+            # print(targets['bbox'].shape)
             optimizer.zero_grad()
+            # import pdb; pdb.set_trace()
             losses = bench(inputs, targets)
-
             loss = losses['loss']
             loss.backward()
             optimizer.step()
@@ -160,7 +167,7 @@ class MyTrainer(TorchCommander):
         model = self.create_model(self.args.network)
         bench = DetBenchTrain(model).to(self.device)
 
-        train_loader, __test_loader = self.create_loaders()
+        train_loader, _ = self.create_loaders()
 
         optimizer = optim.Adam(model.parameters(), lr=self.args.lr)
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2, verbose=True)
@@ -171,7 +178,7 @@ class MyTrainer(TorchCommander):
             header = f'[{epoch}/{self.args.epoch}] '
 
             # lr = scheduler.get_last_lr()[0]
-            lr = optimizer.param_groups[0]["lr"]
+            lr = optimizer.param_groups[0]['lr']
             print(f'{header}Starting lr={lr:.7f}')
 
             train_metrics = self.train_epoch(

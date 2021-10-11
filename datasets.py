@@ -12,7 +12,7 @@ from collections import namedtuple, Counter
 from recordclass import recordclass, RecordClass
 from tqdm import tqdm
 import numpy as np
-from PIL import Image, ImageFilter, ImageOps
+from PIL import Image, ImageFilter, ImageOps, ImageFile
 from matplotlib import pyplot as plt
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -22,6 +22,8 @@ import albumentations as A
 from albumentations.pytorch.transforms import ToTensorV2, ToTensor
 
 from utils import XrayBBItem, calc_mean_and_std, label_to_tensor, draw_bb, tensor_to_pil
+
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 col_target = 'treatment'
 cols_measure = ['left_alpha', 'right_alpha', 'left_oe', 'right_oe', 'left_a', 'right_a', 'left_b', 'right_b', ]
@@ -64,7 +66,7 @@ def read_label(path):
             center_y - h / 2,
             center_x + w / 2,
             center_y + h / 2,
-            class_id,
+            class_id + 1,
         ])
     return pd.DataFrame(columns=cols, data=data)
 
@@ -135,6 +137,7 @@ class XRBBDataset(Dataset):
         for i, t in enumerate(self.albu):
             if isinstance(t, A.HorizontalFlip):
                 self.horizontal_filpper_index = i
+                break
 
     def __len__(self):
         return len(self.items)
@@ -158,10 +161,20 @@ class XRBBDataset(Dataset):
             flipped = result['replay']['transforms'][self.horizontal_filpper_index]['applied']
             if flipped:
                 labels -= 3
-                labels[labels < 0] += 6
+                labels[labels < 1] += 6
 
         if self.use_yxyx:
             boxes = boxes[:, [1, 0, 3, 2]]
+
+        if boxes.shape[0] == 0:
+            boxes = np.zeros([6, 4], dtype=boxes.dtype)
+            labels = np.zeros([6], dtype=boxes.dtype)
+        if boxes.shape[0] < 6:
+            z = np.zeros([6 - boxes.shape[0], 4], dtype=boxes.dtype)
+            boxes = np.concatenate([boxes, z])
+            z = np.zeros([6 - labels.shape[0]], dtype=labels.dtype)
+            labels = np.concatenate([labels, z])
+
         y = {
             'bbox': torch.FloatTensor(boxes),
             'cls': torch.FloatTensor(labels),
@@ -179,7 +192,7 @@ class ROICroppedDataset(Dataset):
 
     def __getitem__(self, idx):
         item = self.items[idx]
-        image = item.image.copy()
+        image = item.image
         vv = np.round(item.label.values[:, :4]).astype(np.int)
         left, top = np.min(vv[:, [0, 1]], axis=0)
         right, bottom = np.max(vv[:, [2, 3]], axis=0)
@@ -221,7 +234,7 @@ if __name__ == '__main__':
 
     augs = [
         # A.RandomCrop(width=100, height=100),
-        A.RandomResizedCrop(width=512, height=512, scale=[2.0, 1.0]),
+        A.RandomResizedCrop(width=512, height=512, scale=[0.1, 0.2]),
         A.HorizontalFlip(p=0.5),
         A.GaussNoise(p=0.2),
         A.OneOf([
@@ -247,10 +260,27 @@ if __name__ == '__main__':
     #     if i > 20:
     #         break
 
-    for i, (x, y) in enumerate(ds):
-        t = draw_bounding_boxes(image=x, boxes=y['bbox'], labels=[str(v.item()) for v in y['cls']])
-        # img = draw_bb(tensor_to_pil(x), y['bbox'], [str(v) for v in y['cls']])
-        img = tensor_to_pil(t)
-        img.save(f'tmp/{i}.png')
-        if i > 20:
-            break
+
+    loader = DataLoader(
+        ds,
+        batch_size=24,
+        num_workers=16,
+    )
+    for i in range(100):
+        for (x, y) in tqdm(loader):
+            assert(y['bbox'].shape[:-1] == y['cls'].shape)
+            assert(y['bbox'].shape[-1] == 4)
+        print(f'ok {i}')
+    exit(0)
+
+    # for i, (x, y) in enumerate(ds):
+    #     t = draw_bounding_boxes(image=x, boxes=y['bbox'], labels=[str(v.item()) for v in y['cls']])
+    #     # img = draw_bb(tensor_to_pil(x), y['bbox'], [str(v) for v in y['cls']])
+    #     img = tensor_to_pil(t)
+    #     print(i)
+    #     print(y['bbox'].shape)
+    #     print(y['cls'].shape)
+    #     print(x.shape)
+    #     img.save(f'tmp/augs/{i}.png')
+    #     if i > 20:
+    #         break
