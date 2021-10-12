@@ -19,13 +19,6 @@ from utils import get_state_dict
 from endaaman import TorchCommander
 
 
-def label_to_tensor(label, device):
-    # return torch.from_numpy(label.values).type(torch.FloatTensor)
-    return {
-        'bbox': torch.FloatTensor(label.values[:, :4]),
-        'cls': torch.FloatTensor(label.values[:, 4]),
-    }
-
 SIZE_BY_NETWORK= {
     'd0': 512,
     'd1': 640,

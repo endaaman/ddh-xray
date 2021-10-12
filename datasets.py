@@ -19,7 +19,7 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from torchvision.utils import draw_bounding_boxes
 import albumentations as A
-from albumentations.pytorch.transforms import ToTensorV2, ToTensor
+from albumentations.pytorch.transforms import ToTensorV2
 
 from utils import XrayBBItem, calc_mean_and_std, label_to_tensor, draw_bb, tensor_to_pil
 
@@ -148,11 +148,10 @@ class XRBBDataset(Dataset):
         with warnings.catch_warnings():
             warnings.simplefilter('ignore')
             result = self.albu(
-                image=np.array(item.image.copy()),
+                image=np.array(item.image),
                 bboxes=item.bb.values[:, :4],
                 labels=item.bb.values[:, 4],
             )
-        warnings.resetwarnings()
         x = result['image']
         boxes = np.array(result['bboxes'])
         labels = np.array(result['labels'])
@@ -260,7 +259,6 @@ if __name__ == '__main__':
     #     if i > 20:
     #         break
 
-
     loader = DataLoader(
         ds,
         batch_size=24,
@@ -284,3 +282,10 @@ if __name__ == '__main__':
     #     img.save(f'tmp/augs/{i}.png')
     #     if i > 20:
     #         break
+    for i, (x, y) in tqdm(enumerate(ds), total=len(ds)):
+        t = draw_bounding_boxes(image=x, boxes=y['bbox'], labels=[str(v.item()) for v in y['cls']])
+        # img = draw_bb(tensor_to_pil(x), y['bbox'], [str(v) for v in y['cls']])
+        img = tensor_to_pil(t)
+        img.save(f'tmp/aug/{i}.png')
+        if i > 20:
+            break

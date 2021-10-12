@@ -135,10 +135,12 @@ class LightGBMBench(Bench):
             train_data, # 学習データ
             1000, # 学習を繰り返す最大epoch数, epoch = モデルの学習回数
             valid_sets=valid_sets,
-            verbose_eval=200, # 100 epoch ごとに経過を表示する
-            early_stopping_rounds=150, # 150epoch続けて検証データのロスが減らなかったら学習を中断する
+            verbose_eval=200,
+            early_stopping_rounds=150,
             categorical_feature=cols_cat,
         )
+
+        print('TRAIN2')
         # tmp = pd.DataFrame()
         # tmp['feature'] = cols_feature
         # tmp['importance'] = model.feature_importance()
