@@ -98,8 +98,6 @@ class XRBBDataset(Dataset):
         self.apply_augs([])
         self.horizontal_filpper_index = None
 
-    def get_mean_and_std(self):
-        return calc_mean_and_std([item.image for item in self.items])
 
     def load_items(self):
         if self.is_training:
@@ -127,9 +125,11 @@ class XRBBDataset(Dataset):
         return items
 
     def apply_augs(self, augs):
+        mean, std = calc_mean_and_std([item.image for item in self.items])
+        print(mean, std)
         self.albu = A.ReplayCompose([
             *augs,
-            A.Normalize(*[[v] * 3 for v in self.get_mean_and_std()]) if self.normalized else None,
+            A.Normalize(*[[v] * 3 for v in [mean, std]]) if self.normalized else None,
             ToTensorV2(),
         ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']))
 
@@ -259,18 +259,6 @@ if __name__ == '__main__':
     #     if i > 20:
     #         break
 
-    loader = DataLoader(
-        ds,
-        batch_size=24,
-        num_workers=16,
-    )
-    for i in range(100):
-        for (x, y) in tqdm(loader):
-            assert(y['bbox'].shape[:-1] == y['cls'].shape)
-            assert(y['bbox'].shape[-1] == 4)
-        print(f'ok {i}')
-    exit(0)
-
     # for i, (x, y) in enumerate(ds):
     #     t = draw_bounding_boxes(image=x, boxes=y['bbox'], labels=[str(v.item()) for v in y['cls']])
     #     # img = draw_bb(tensor_to_pil(x), y['bbox'], [str(v) for v in y['cls']])
@@ -286,6 +274,13 @@ if __name__ == '__main__':
         t = draw_bounding_boxes(image=x, boxes=y['bbox'], labels=[str(v.item()) for v in y['cls']])
         # img = draw_bb(tensor_to_pil(x), y['bbox'], [str(v) for v in y['cls']])
         img = tensor_to_pil(t)
+        print(x.shape)
+        print(x.dtype)
+        print(y['bbox'].shape)
+        print(y['bbox'].shape)
+        print(y['bbox'].dtype)
+        print(y['cls'].shape)
+        print(y['cls'].dtype)
         img.save(f'tmp/aug/{i}.png')
         if i > 20:
             break

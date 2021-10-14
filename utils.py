@@ -79,7 +79,6 @@ class XrayBBItem:
         else:
             self.label = read_label(self.label_path)
 
-
 def pil_to_tensor(img):
     return transforms.functional.to_tensor(img)
 
