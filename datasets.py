@@ -87,13 +87,23 @@ def pad_to_fixed_size(img, size=(256, 128), bg=(0,0,0)):
         bg.paste(img, ((size[0] - new_width)//2, 0))
     return bg
 
+def pad_targets(bboxes, labels, fill=(0, 0)):
+    pad_bboxes = np.zeros([6, 4], dtype=bboxes.dtype)
+    pad_labels = np.zeros([6], dtype=bboxes.dtype)
+    if fill:
+        pad_bboxes.fill(fill[0])
+        pad_labels.fill(fill[1])
+    pad_bboxes[0:bboxes.shape[0], :] = bboxes
+    pad_labels[0:labels.shape[0]] = labels
+    return pad_bboxes, pad_labels
 
-class XRBBDataset(Dataset):
-    def __init__(self, is_training=True, use_yxyx=True, normalized=True):
-        self.augmentation = None
+
+class BaseDataset(Dataset):
+    def __init__(self, is_training=True, normalized=True):
         self.is_training = is_training
-        self.use_yxyx = use_yxyx
         self.normalized = normalized
+
+        self.augmentation = None
         self.items = self.load_items()
         self.apply_augs([])
         self.horizontal_filpper_index = None
@@ -126,7 +136,6 @@ class XRBBDataset(Dataset):
 
     def apply_augs(self, augs):
         mean, std = calc_mean_and_std([item.image for item in self.items])
-        print(mean, std)
         self.albu = A.ReplayCompose([
             *augs,
             A.Normalize(*[[v] * 3 for v in [mean, std]]) if self.normalized else None,
@@ -142,9 +151,7 @@ class XRBBDataset(Dataset):
     def __len__(self):
         return len(self.items)
 
-    def __getitem__(self, idx):
-        item = self.items[idx]
-
+    def aug(self, item):
         with warnings.catch_warnings():
             warnings.simplefilter('ignore')
             result = self.albu(
@@ -153,31 +160,50 @@ class XRBBDataset(Dataset):
                 labels=item.bb.values[:, 4],
             )
         x = result['image']
-        boxes = np.array(result['bboxes'])
+        bboxes = np.array(result['bboxes'])
         labels = np.array(result['labels'])
-
         if self.horizontal_filpper_index is not None:
             flipped = result['replay']['transforms'][self.horizontal_filpper_index]['applied']
             if flipped:
                 labels -= 3
                 labels[labels < 1] += 6
+        return x, bboxes, labels
 
-        if self.use_yxyx:
-            boxes = boxes[:, [1, 0, 3, 2]]
 
-        if boxes.shape[0] == 0:
-            boxes = np.zeros([6, 4], dtype=boxes.dtype)
-            labels = np.zeros([6], dtype=boxes.dtype)
-        if boxes.shape[0] < 6:
-            z = np.zeros([6 - boxes.shape[0], 4], dtype=boxes.dtype)
-            boxes = np.concatenate([boxes, z])
-            z = np.zeros([6 - labels.shape[0]], dtype=labels.dtype)
-            labels = np.concatenate([labels, z])
+class EffdetDataset(BaseDataset):
+    def __getitem__(self, idx):
+        item = self.items[idx]
+        x, bboxes, labels = self.aug(item)
+        # use yxyx
+        bboxes = bboxes[:, [1, 0, 3, 2]]
+        bboxes, labels = pad_targets(bboxes, labels)
 
         y = {
-            'bbox': torch.FloatTensor(boxes),
+            'bbox': torch.FloatTensor(bboxes),
             'cls': torch.FloatTensor(labels),
         }
+        return x, y
+
+
+
+def xyxy_to_yolo(bb, w, h):
+    ww = (bb[:, 2] - bb[:, 0])
+    hh = (bb[:, 3] - bb[:, 1])
+    xx = bb[:, 0] + ww * 0.5
+    yy = bb[:, 1] + hh * 0.5
+    bb = np.stack([xx, yy, ww, hh], axis=1)
+    # bb[:, [0, 2]] /= w
+    # bb[:, [1, 3]] /= h
+    return bb
+
+class YoloDataset(BaseDataset):
+    def __getitem__(self, idx):
+        item = self.items[idx]
+        x, bboxes, labels = self.aug(item)
+        bboxes = xyxy_to_yolo(bboxes, w=x.shape[2], h=x.shape[1])
+
+        bboxes, labels = pad_targets(bboxes, labels, fill=(0, -1))
+        y = np.concatenate([labels[:, None], bboxes], axis=1)
         return x, y
 
 
@@ -251,36 +277,14 @@ if __name__ == '__main__':
         A.HueSaturationValue(p=0.3),
     ]
 
-    ds = XRBBDataset(use_yxyx=False, normalized=False)
+    ds = YoloDataset(normalized=False)
     ds.apply_augs(augs)
-    # for i, (x, y) in enumerate(ds):
-    #     print(y)
-    #     break
-    #     if i > 20:
-    #         break
-
-    # for i, (x, y) in enumerate(ds):
-    #     t = draw_bounding_boxes(image=x, boxes=y['bbox'], labels=[str(v.item()) for v in y['cls']])
-    #     # img = draw_bb(tensor_to_pil(x), y['bbox'], [str(v) for v in y['cls']])
-    #     img = tensor_to_pil(t)
-    #     print(i)
-    #     print(y['bbox'].shape)
-    #     print(y['cls'].shape)
-    #     print(x.shape)
-    #     img.save(f'tmp/augs/{i}.png')
-    #     if i > 20:
-    #         break
-    for i, (x, y) in tqdm(enumerate(ds), total=len(ds)):
-        t = draw_bounding_boxes(image=x, boxes=y['bbox'], labels=[str(v.item()) for v in y['cls']])
+    for i, (x, y) in enumerate(ds):
+        # t = draw_bounding_boxes(image=x, boxes=y[1:], labels=[str(v.item()) for v in y['cls']])
         # img = draw_bb(tensor_to_pil(x), y['bbox'], [str(v) for v in y['cls']])
-        img = tensor_to_pil(t)
-        print(x.shape)
-        print(x.dtype)
-        print(y['bbox'].shape)
-        print(y['bbox'].shape)
-        print(y['bbox'].dtype)
-        print(y['cls'].shape)
-        print(y['cls'].dtype)
-        img.save(f'tmp/aug/{i}.png')
-        if i > 20:
+        # img = tensor_to_pil(t)
+        # img.save(f'tmp/aug/{i}.png')
+        print(y)
+        print()
+        if i > 2:
             break
