@@ -3,3 +3,4 @@ results/
 weights/
 out/
 tmp/
+lightning_logs/

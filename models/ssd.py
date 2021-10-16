@@ -326,7 +326,7 @@ class SSD300(nn.Module):
     """
 
     def __init__(self, n_classes):
-        super(SSD300, self).__init__()
+        super().__init__()
 
         self.n_classes = n_classes
 

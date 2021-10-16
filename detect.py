@@ -12,15 +12,18 @@ import albumentations as A
 # from effdet import EfficientDet, FocalLoss, EFFDET_PARAMS
 from effdet import EfficientDet, DetBenchTrain, get_efficientdet_config
 from effdet.efficientdet import HeadNet
-# from augmentation import Augmentation, ResizeAugmentation, CropAugmentation
+from pytorch_lightning.core.lightning import LightningModule
+from pytorch_lightning import Trainer
+import pytorch_lightning as pl
+
 from datasets import EffdetDataset
 from utils import get_state_dict
-
+from models import YOLOv3, SSD300
 from endaaman import TorchCommander
 
 
 # SIZE_BY_NETWORK = {f'd{d}': 128 * (4+d) for d in range(8)}
-SIZE_BY_NETWORK = {
+SIZE_BY_MODEL = {
     'd0': 128 * 4,
     'd1': 128 * 5,
     'd2': 128 * 6,
@@ -29,12 +32,67 @@ SIZE_BY_NETWORK = {
     'd5': 128 * 10,
     'd6': 128 * 12,
     'd7': 128 * 14,
+    'yolo': 512,
+    'ssd': 300,
 }
+
+class BaseModule(LightningModule):
+    def __init__(self, args):
+        super().__init__()
+        self.args = args
+        self.model_name = args.model_name
+        self.batch_size = args.batch_size
+        self.workers = args.workers
+        self.lr = args.lr
+        self.image_size = SIZE_BY_MODEL[self.model_name]
+        self.log_every_n_steps = 12
+
+    def configure_optimizers(self):
+        return optim.Adam(self.model.parameters(), lr=self.lr)
+
+    def train_dataloader(self):
+        return DataLoader(
+            self.dataset,
+            batch_size=self.batch_size,
+            num_workers=self.workers,
+        )
+
+
+class EffdetModule(BaseModule):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        cfg = get_efficientdet_config(f'tf_efficientdet_{self.model_name}')
+        self.model = EfficientDet(cfg)
+        self.bench = DetBenchTrain(self.model)
+        self.dataset =  EffdetDataset()
+        if not self.args.no_aug:
+            self.dataset.apply_augs([
+                A.RandomResizedCrop(width=self.image_size, height=self.image_size, scale=[0.7, 1.0]),
+                A.HorizontalFlip(p=0.5),
+                A.GaussNoise(p=0.2),
+                A.OneOf([
+                    A.MotionBlur(p=.2),
+                    A.MedianBlur(blur_limit=3, p=0.1),
+                    A.Blur(blur_limit=3, p=0.1),
+                ], p=0.2),
+                A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.2, rotate_limit=5, p=0.5),
+                A.OneOf([
+                    A.CLAHE(clip_limit=2),
+                    A.Emboss(),
+                    A.RandomBrightnessContrast(),
+                ], p=0.3),
+                A.HueSaturationValue(p=0.3),
+            ])
+
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        loss = self.bench(x, y)
+        return {'loss': loss['loss']}
 
 
 class MyTrainer(TorchCommander):
     def arg_common(self, parser):
-        parser.add_argument('-m', '--model', default='d0', type=str, choices=SIZE_BY_NETWORK.keys() + ['yolo'])
+        parser.add_argument('-m', '--model-name', default='d0', type=str, choices=list(SIZE_BY_MODEL.keys()) + ['yolo'])
         parser.add_argument('-e', '--epoch', type=int, default=50)
         parser.add_argument('-b', '--batch-size', type=int, default=48)
         parser.add_argument('--lr', type=float, default=0.01)
@@ -43,7 +101,6 @@ class MyTrainer(TorchCommander):
 
     def run_check(self):
         cfg = get_efficientdet_config(f'tf_efficientdet_{self.args.network}')
-        cfg.image_size
         model = EfficientDet(cfg)
         bench = DetBenchTrain(model)
         s = SIZE_BY_NETWORK[self.args.network]
@@ -81,6 +138,11 @@ class MyTrainer(TorchCommander):
         #     num_outputs=config.num_outputs,
         # )
         return model
+
+    def run_pl(self):
+        l = pl.Trainer(gpus=1, log_every_n_steps=16)
+        m = EffdetModule(self.args)
+        l.fit(m)
 
     def create_loaders(self, target='effdet'):
         train_dataset = EffdetDataset()
@@ -134,10 +196,7 @@ class MyTrainer(TorchCommander):
             for k, v in iter_metrics.items():
                 metrics[k].append(v)
 
-        return {k: np.mean(v) for k, v in metrics.items()}
-
-    def arg_train(self, parser):
-        pass
+        return { k: np.mean(v) for k, v in metrics.items() }
 
     def run_train(self):
         model = self.create_model(self.args.network)
