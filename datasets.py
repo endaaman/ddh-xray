@@ -57,7 +57,7 @@ def read_label(path):
     data = []
     for line in lines:
         parted  = line.split(' ')
-        class_id = int(parted[0])
+        class_id = int(parted[0]) + 1
         # convert from yolo to pascal voc
         center_x, center_y, w, h = [float(v) * IMAGE_SIZE for v in parted[1:]]
         # class_id = class_id % 3
@@ -66,7 +66,7 @@ def read_label(path):
             center_y - h / 2,
             center_x + w / 2,
             center_y + h / 2,
-            class_id + 1,
+            class_id,
         ])
     return pd.DataFrame(columns=cols, data=data)
 
@@ -148,6 +148,14 @@ class BaseDataset(Dataset):
                 self.horizontal_filpper_index = i
                 break
 
+    def validate(self):
+        for item in tqdm(self.items):
+            m = np.all(item.bb['id'].values == np.array([1, 2, 3, 4, 5, 6]))
+            if not m:
+                print(item.name)
+                print(item.bb)
+                print()
+
     def __len__(self):
         return len(self.items)
 
@@ -185,7 +193,6 @@ class EffdetDataset(BaseDataset):
         return x, y
 
 
-
 def xyxy_to_yolo(bb, w, h):
     ww = (bb[:, 2] - bb[:, 0])
     hh = (bb[:, 3] - bb[:, 1])
@@ -201,7 +208,6 @@ class YoloDataset(BaseDataset):
         item = self.items[idx]
         x, bboxes, labels = self.aug(item)
         bboxes = xyxy_to_yolo(bboxes, w=x.shape[2], h=x.shape[1])
-
         bboxes, labels = pad_targets(bboxes, labels, fill=(0, -1))
         y = np.concatenate([labels[:, None], bboxes], axis=1)
         return x, y
@@ -279,12 +285,4 @@ if __name__ == '__main__':
 
     ds = YoloDataset(normalized=False)
     ds.apply_augs(augs)
-    for i, (x, y) in enumerate(ds):
-        # t = draw_bounding_boxes(image=x, boxes=y[1:], labels=[str(v.item()) for v in y['cls']])
-        # img = draw_bb(tensor_to_pil(x), y['bbox'], [str(v) for v in y['cls']])
-        # img = tensor_to_pil(t)
-        # img.save(f'tmp/aug/{i}.png')
-        print(y)
-        print()
-        if i > 2:
-            break
+    ds.validate()

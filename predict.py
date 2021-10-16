@@ -33,6 +33,13 @@ LABEL_TO_STR = {
     6: 'left in',
 }
 
+# RightTop
+# RightOut
+# RightIn
+# LeftTop
+# LeftOut
+# LeftIn
+
 class Predictor(TorchCommander):
     def create_bench(self, state):
         n = state['args'].network
