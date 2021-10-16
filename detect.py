@@ -13,60 +13,52 @@ import albumentations as A
 from effdet import EfficientDet, DetBenchTrain, get_efficientdet_config
 from effdet.efficientdet import HeadNet
 # from augmentation import Augmentation, ResizeAugmentation, CropAugmentation
-from datasets import XRBBDataset
+from datasets import EffdetDataset
 from utils import get_state_dict
 
 from endaaman import TorchCommander
 
 
-SIZE_BY_NETWORK= {
-    'd0': 512,
-    'd1': 640,
+# SIZE_BY_NETWORK = {f'd{d}': 128 * (4+d) for d in range(8)}
+SIZE_BY_NETWORK = {
+    'd0': 128 * 4,
+    'd1': 128 * 5,
+    'd2': 128 * 6,
+    'd3': 128 * 7,
+    'd4': 128 * 8,
+    'd5': 128 * 10,
+    'd6': 128 * 12,
+    'd7': 128 * 14,
 }
 
-class MyTrainer(TorchCommander):
-    def run_check(self):
-        print(self.device)
-        return
-        # model = self.create_model(self.args.network)
-        cfg = get_efficientdet_config(f'tf_efficientdet_{self.args.network}')
-        model = EfficientDet(cfg)
-        bench = DetBenchTrain(model)
-        images = torch.randn(2, 3, 512, 512)
-        # labels = torch.ones(2, 2, 5, dtype=torch.float)
-        targets = {
-            'bbox': torch.FloatTensor(
-                [
-                    [
-                        [0, 0, 20, 30],
-                        [0, 0, 20, 30],
-                    ],
-                    [
-                        [0, 0, 20, 30],
-                        [0, 0, 20, 30],
-                    ]
-                ]
-            ),
-            'cls': torch.LongTensor( [ [ 1, 2 ], [ 1, 2 ], ]) ,
-        }
-        print(targets['bbox'].shape)
-        loss = bench(images, targets)
-        # criterion = FocalLoss()
-        # classification, regression, anchors = model(images)
-        # print('anchors shape:', anchors.shape)
-        # print('classification shape:', classification.shape)
-        # print('regression shape:', regression.shape)
-        # classification_loss, regression_loss = criterion(classification, regression, anchors, labels, 'cpu')
-        # print(classification_loss)
-        # print(regression_loss)
 
+class MyTrainer(TorchCommander):
     def arg_common(self, parser):
-        parser.add_argument('-n', '--network', default='d0', type=str, help='efficientdet-[d0, d1, ..]')
+        parser.add_argument('-m', '--model', default='d0', type=str, choices=SIZE_BY_NETWORK.keys() + ['yolo'])
         parser.add_argument('-e', '--epoch', type=int, default=50)
         parser.add_argument('-b', '--batch-size', type=int, default=48)
         parser.add_argument('--lr', type=float, default=0.01)
         parser.add_argument('--no-aug', action='store_true')
         parser.add_argument('--workers', type=int, default=os.cpu_count()//2)
+
+    def run_check(self):
+        cfg = get_efficientdet_config(f'tf_efficientdet_{self.args.network}')
+        cfg.image_size
+        model = EfficientDet(cfg)
+        bench = DetBenchTrain(model)
+        s = SIZE_BY_NETWORK[self.args.network]
+        images = torch.randn(2, 3, s, s)
+        targets = {
+            'bbox': torch.FloatTensor(
+                [
+                    [
+                        [0, 0, 20, 30],
+                    ]
+                ]
+            ),
+            'cls': torch.LongTensor( [ [ 1, ],]) ,
+        }
+        loss = bench(images, targets)
 
     def save_weights(self, model, epoch):
         state = {
@@ -90,17 +82,13 @@ class MyTrainer(TorchCommander):
         # )
         return model
 
-    def create_loaders(self):
-        train_dataset = XRBBDataset(use_yxyx=True)
+    def create_loaders(self, target='effdet'):
+        train_dataset = EffdetDataset()
         tile_size = SIZE_BY_NETWORK.get(self.args.network, 512)
-        print(tile_size)
-        if self.args.no_aug:
-            pass
-        else:
-            train_dataset.apply_augs(A.Compose([
-                # A.RandomCrop(width=100, height=100),
+        if not self.args.no_aug:
+            train_dataset.apply_augs([
                 A.RandomResizedCrop(width=tile_size, height=tile_size, scale=[0.7, 1.0]),
-                # A.HorizontalFlip(p=0.5),
+                A.HorizontalFlip(p=0.5),
                 A.GaussNoise(p=0.2),
                 A.OneOf([
                     A.MotionBlur(p=.2),
@@ -108,14 +96,13 @@ class MyTrainer(TorchCommander):
                     A.Blur(blur_limit=3, p=0.1),
                 ], p=0.2),
                 A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.2, rotate_limit=5, p=0.5),
-                # A.PiecewiseAffine(p=0.2),
                 A.OneOf([
                     A.CLAHE(clip_limit=2),
                     A.Emboss(),
                     A.RandomBrightnessContrast(),
                 ], p=0.3),
                 A.HueSaturationValue(p=0.3),
-            ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels'])))
+            ])
 
         train_loader = DataLoader(
             train_dataset,
@@ -133,11 +120,7 @@ class MyTrainer(TorchCommander):
             inputs = inputs.to(self.device)
             targets['bbox'] = targets['bbox'].to(self.device)
             targets['cls'] = targets['cls'].to(self.device)
-            # print(inputs.shape)
-            # print(targets['cls'].shape)
-            # print(targets['bbox'].shape)
             optimizer.zero_grad()
-            # import pdb; pdb.set_trace()
             losses = bench(inputs, targets)
             loss = losses['loss']
             loss.backward()
