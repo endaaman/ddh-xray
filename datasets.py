@@ -203,7 +203,7 @@ def xyxy_to_yolo(bb, w, h):
     # bb[:, [1, 3]] /= h
     return bb
 
-class YoloDataset(BaseDataset):
+class YOLODataset(BaseDataset):
     def __getitem__(self, idx):
         item = self.items[idx]
         x, bboxes, labels = self.aug(item)
