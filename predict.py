@@ -56,6 +56,8 @@ class YOLOPredictor:
 
     def __call__(self, inputs):
         outputs = self.model(inputs)
+        print(outputs.shape)
+        print(outputs)
         detection = non_max_suppression(outputs, self.conf_thres, self.nms_thres)
         return detection
 
@@ -74,8 +76,9 @@ class Predictor(TorchCommander):
             bench.eval()
             return EffdetPredictor(bench)
         elif model_name == 'yolo':
-            model = Darknet().to(self.device)
-            model.load_state_dict(weights['state_dict'])
+            model = Darknet()
+            model.load_darknet_weights(weights['state_dict'])
+            model = model.to(self.device)
             return YOLOPredictor(model, self.args.conf_thres, self.args.nms_thres)
         else:
             raise ValueError(f'Invalid model_name: {model_name}')
@@ -83,14 +86,18 @@ class Predictor(TorchCommander):
     def arg_common(self, parser):
         parser.add_argument('-w', '--weights', type=str, required=True)
         parser.add_argument('-b', '--batch-size', type=int, default=16)
-        parser.add_argument('--conf_thres', type=float, default=0.8, help='object confidence threshold')
-        parser.add_argument('--nms_thres', type=float, default=0.4, help='iou thresshold for non-maximum suppression')
+        parser.add_argument('--conf_thres', type=float, default=0.2, help='object confidence threshold')
+        parser.add_argument('--nms_thres', type=float, default=0.1, help='iou thresshold for non-maximum suppression')
 
     def pre_common(self):
         self.font = ImageFont.truetype('/usr/share/fonts/ubuntu/Ubuntu-R.ttf', size=16)
 
     def detect_images(self, predictor, imgs, size=512):
         imgs = [i.resize((size, size)) for i in imgs]
+        transform_image = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize([0.4831]*3, [0.3257]*3),
+        ])
 
         bs = self.args.batch_size
         outputs = []
@@ -99,7 +106,7 @@ class Predictor(TorchCommander):
         for start in t:
             batch = imgs[start:start + bs]
 
-            tt = torch.stack([pil_to_tensor(i) for i in batch]).to(self.device)
+            tt = torch.stack([transform_image(i) for i in batch]).to(self.device)
             with torch.no_grad():
                 output_tensor = predictor(tt)
             outputs.append(output_tensor)
@@ -108,7 +115,6 @@ class Predictor(TorchCommander):
         outputs = torch.cat(outputs).type(torch.long)
 
         results = []
-        print(outputs.shape)
         for img, bboxes in zip(imgs, outputs):
             best_bboxes = []
             for i in LABEL_TO_STR.keys():
