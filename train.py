@@ -130,14 +130,14 @@ class MyTrainer(TorchCommander):
 
             #* save weights
             if epoch % self.args.period_save_weight == 0:
-                weights_path = self.save_checkpoint(model, epoch, train_history, val_history)
+                weights_path = self.save_weights(model, epoch, train_history, val_history)
                 print(f'{header}Saved "{weights_path}"')
 
             scheduler.step(train_metrics['loss'][-1])
             # scheduler.step()
             print()
 
-    def save_checkpoint(self, model, epoch, train_history, val_history):
+    def save_weights(self, model, epoch, train_history, val_history):
         state = {
             'model_name': self.model_name,
             'suffix': self.args.suffix,
