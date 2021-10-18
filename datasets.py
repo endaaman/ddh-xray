@@ -87,9 +87,9 @@ def pad_to_fixed_size(img, size=(256, 128), bg=(0,0,0)):
         bg.paste(img, ((size[0] - new_width)//2, 0))
     return bg
 
-def pad_targets(bboxes, labels, fill=(0, 0)):
-    pad_bboxes = np.zeros([6, 4], dtype=bboxes.dtype)
-    pad_labels = np.zeros([6], dtype=bboxes.dtype)
+def pad_targets(bboxes, labels, size, fill=(0, 0)):
+    pad_bboxes = np.zeros([size, 4], dtype=bboxes.dtype)
+    pad_labels = np.zeros([size], dtype=bboxes.dtype)
     if fill:
         pad_bboxes.fill(fill[0])
         pad_labels.fill(fill[1])
@@ -182,7 +182,7 @@ class EffdetDataset(BaseDataset):
         x, bboxes, labels = self.aug(item)
         # use yxyx
         bboxes = bboxes[:, [1, 0, 3, 2]]
-        bboxes, labels = pad_targets(bboxes, labels)
+        bboxes, labels = pad_targets(bboxes, labels, 6)
 
         y = {
             'bbox': torch.FloatTensor(bboxes),
@@ -206,8 +206,10 @@ class YOLODataset(BaseDataset):
         item = self.items[idx]
         x, bboxes, labels = self.aug(item)
         bboxes = xyxy_to_yolo(bboxes, w=x.shape[2], h=x.shape[1])
-        bboxes, labels = pad_targets(bboxes, labels, fill=(0, -1))
-        y = np.concatenate([labels[:, None], bboxes], axis=1)
+        bboxes, labels = pad_targets(bboxes, labels, 6, fill=(0, -1))
+        batches = np.zeros([6, 1])
+        # yolo targets: [batch_idx, class_id, x, y, w, h]
+        y = np.concatenate([batches, labels[:, None], bboxes], axis=1)
         return x, y
 
 
@@ -281,6 +283,6 @@ if __name__ == '__main__':
         A.HueSaturationValue(p=0.3),
     ]
 
-    ds = YoloDataset(normalized=False)
+    ds = YOLODataset(normalized=False)
     ds.apply_augs(augs)
     ds.validate()
