@@ -101,10 +101,10 @@ class YOLOModule(BaseModule):
 
     def training_step(self, batch, batch_idx):
         x, targets = batch
-        targets[:, 0, :] = batch_idx
-        targets = targets.view(-1, 6) # [B, [Bidx]]
-
-        print(targets.shape)
+        for idx, tt in enumerate(targets):
+            tt[:, 0] = idx
+        targets = targets.view(-1, 6) # batch x [batch_idx, cls_id, x, y, w, h]
+        print(targets)
         loss, y = self.model(x, targets)
         return {'loss': loss}
 

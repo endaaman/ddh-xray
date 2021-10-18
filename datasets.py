@@ -58,10 +58,9 @@ def read_label(path):
     for line in lines:
         parted  = line.split(' ')
         class_id = int(parted[0]) + 1
-        # convert from yolo to pascal voc
         center_x, center_y, w, h = [float(v) * IMAGE_SIZE for v in parted[1:]]
-        # class_id = class_id % 3
         data.append([
+            # convert yolo to pascal voc
             center_x - w / 2,
             center_y - h / 2,
             center_x + w / 2,
@@ -197,8 +196,8 @@ def xyxy_to_yolo(bb, w, h):
     xx = bb[:, 0] + ww * 0.5
     yy = bb[:, 1] + hh * 0.5
     bb = np.stack([xx, yy, ww, hh], axis=1)
-    # bb[:, [0, 2]] /= w
-    # bb[:, [1, 3]] /= h
+    bb[:, [0, 2]] /= w
+    bb[:, [1, 3]] /= h
     return bb
 
 class YOLODataset(BaseDataset):
@@ -210,6 +209,7 @@ class YOLODataset(BaseDataset):
         batches = np.zeros([6, 1])
         # yolo targets: [batch_idx, class_id, x, y, w, h]
         y = np.concatenate([batches, labels[:, None], bboxes], axis=1)
+        y = torch.FloatTensor(y)
         return x, y
 
 
