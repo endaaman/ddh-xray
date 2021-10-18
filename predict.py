@@ -19,9 +19,15 @@ from utils import pil_to_tensor
 from endaaman import TorchCommander
 
 
-SIZE_BY_NETWORK= {
-    'd0': 512,
-    'd1': 640,
+SIZE_BY_DEPTH = {
+    'd0': 128 * 4,
+    'd1': 128 * 5,
+    'd2': 128 * 6,
+    'd3': 128 * 7,
+    'd4': 128 * 8,
+    'd5': 128 * 10,
+    'd6': 128 * 12,
+    'd7': 128 * 14,
 }
 
 LABEL_TO_STR = {
@@ -33,12 +39,6 @@ LABEL_TO_STR = {
     6: 'left in',
 }
 
-# RightTop
-# RightOut
-# RightIn
-# LeftTop
-# LeftOut
-# LeftIn
 
 class Predictor(TorchCommander):
     def create_bench(self, state):
