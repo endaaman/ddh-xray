@@ -152,6 +152,10 @@ class MyTrainer(TorchCommander):
             weights_dir += '_' + self.args.suffix
         os.makedirs(weights_dir, exist_ok=True)
         weights_path = os.path.join(weights_dir, f'{epoch}.pth')
+        ### WORKAROUND BEGIN
+        if self.model_name == 'yolo':
+            model.save_darknet_weights(os.path.join(weights_dir, f'{epoch}.darknet'))
+        ### WORKAROUND END
         torch.save(state, weights_path)
         return weights_path
 

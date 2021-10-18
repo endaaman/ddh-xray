@@ -77,8 +77,12 @@ class Predictor(TorchCommander):
             return EffdetPredictor(bench)
         elif model_name == 'yolo':
             model = Darknet()
-            model.load_darknet_weights(weights['state_dict'])
             model = model.to(self.device)
+            ### WORKAROUND BEGIN
+            dp = os.path.join(os.path.dirname(self.args.weights), str(weights['epoch']) + '.darknet')
+            print(dp)
+            model.load_darknet_weights(dp)
+            ### WORKAROUND END
             return YOLOPredictor(model, self.args.conf_thres, self.args.nms_thres)
         else:
             raise ValueError(f'Invalid model_name: {model_name}')
