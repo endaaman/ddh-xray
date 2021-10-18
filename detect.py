@@ -47,26 +47,23 @@ class BaseModule(LightningModule):
         self.lr = args.lr
         self.image_size = SIZE_BY_MODEL[self.model_name]
         self.log_every_n_steps = 12
-        if self.args.no_aug:
-            self.augs = []
-        else:
-            self.augs = [
-                A.RandomResizedCrop(width=self.image_size, height=self.image_size, scale=[0.7, 1.0]),
-                A.HorizontalFlip(p=0.5),
-                A.GaussNoise(p=0.2),
-                A.OneOf([
-                    A.MotionBlur(p=.2),
-                    A.MedianBlur(blur_limit=3, p=0.1),
-                    A.Blur(blur_limit=3, p=0.1),
-                ], p=0.2),
-                A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.2, rotate_limit=5, p=0.5),
-                A.OneOf([
-                    A.CLAHE(clip_limit=2),
-                    A.Emboss(),
-                    A.RandomBrightnessContrast(),
-                ], p=0.3),
-                A.HueSaturationValue(p=0.3),
-            ]
+        self.augs = [] if self.args.no_aug else [
+            A.RandomResizedCrop(width=self.image_size, height=self.image_size, scale=[0.7, 1.0]),
+            A.HorizontalFlip(p=0.5),
+            A.GaussNoise(p=0.2),
+            A.OneOf([
+                A.MotionBlur(p=.2),
+                A.MedianBlur(blur_limit=3, p=0.1),
+                A.Blur(blur_limit=3, p=0.1),
+            ], p=0.2),
+            A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.2, rotate_limit=5, p=0.5),
+            A.OneOf([
+                A.CLAHE(clip_limit=2),
+                A.Emboss(),
+                A.RandomBrightnessContrast(),
+            ], p=0.3),
+            A.HueSaturationValue(p=0.3),
+        ]
 
     def configure_optimizers(self):
         return optim.Adam(self.model.parameters(), lr=self.lr)
@@ -85,7 +82,7 @@ class EffdetModule(BaseModule):
         cfg = get_efficientdet_config(f'tf_efficientdet_{self.args.model_name}')
         self.model = EfficientDet(cfg)
         self.bench = DetBenchTrain(self.model)
-        self.dataset =  EffdetDataset()
+        self.dataset = EffdetDataset()
         self.dataset.apply_augs(self.augs)
 
     def training_step(self, batch, batch_idx):

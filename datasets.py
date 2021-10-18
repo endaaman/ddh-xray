@@ -102,12 +102,10 @@ class BaseDataset(Dataset):
     def __init__(self, is_training=True, normalized=True):
         self.is_training = is_training
         self.normalized = normalized
-
         self.augmentation = None
         self.items = self.load_items()
         self.apply_augs([])
         self.horizontal_filpper_index = None
-
 
     def load_items(self):
         if self.is_training:
