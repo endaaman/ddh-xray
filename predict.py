@@ -63,7 +63,10 @@ class YOLOPredictor:
 
 
 class Predictor(TorchCommander):
-    def create_predictor(self, weights):
+    def create_predictor(self):
+        # weights = torch.load(self.args.weights)
+        weights = torch.load(self.args.weights, map_location=lambda storage, loc: storage)
+        print(weights.keys())
         model_name = weights['model_name']
 
         if model_name == 'effdet':
@@ -80,7 +83,6 @@ class Predictor(TorchCommander):
             model = model.to(self.device)
             ### WORKAROUND BEGIN
             dp = os.path.join(os.path.dirname(self.args.weights), str(weights['epoch']) + '.darknet')
-            print(dp)
             model.load_darknet_weights(dp)
             ### WORKAROUND END
             return YOLOPredictor(model, self.args.conf_thres, self.args.nms_thres)
@@ -144,10 +146,7 @@ class Predictor(TorchCommander):
 
     def run_dir(self):
         os.makedirs(self.args.output_dir, exist_ok=True)
-
-        # weights = torch.load(self.args.weights, map_location=lambda storage, loc: storage)
-        weights = torch.load(self.args.weights)
-        predictor = create_predictor(weights)
+        predictor = create_predictor()
 
         image_size = SIZE_BY_NETWORK.get(state['args'].network, 512)
         imgs = []
@@ -173,8 +172,7 @@ class Predictor(TorchCommander):
     def run_single(self):
         dest_dir = self.args.output_dir
         os.makedirs(dest_dir, exist_ok=True)
-        # state = torch.load(self.args.weights, map_location=lambda storage, loc: storage)
-        predictor = self.create_predictor(torch.load(self.args.weights))
+        predictor = self.create_predictor()
 
         img_size = 512
         img = Image.open(self.args.input)

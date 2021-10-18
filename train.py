@@ -48,9 +48,11 @@ class MyTrainer(TorchCommander):
         parser.add_argument('-p', '--period-save-weight', type=int, default=10)
         parser.add_argument('-n', '--no-show-fig', action='store_true')
 
-    def train_model(self, model, train_loader, val_loader, eval_fn, additional_metrics={}):
+    def train_model(self, model, loaders, eval_fn, additional_metrics={}):
         assert self.model_name
         matplotlib.use('Agg')
+        train_loader = loaders.get('train')
+        val_loader = loaders.get('val')
 
         optimizer = optim.Adam(model.parameters(), lr=self.args.lr)
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2)
@@ -151,11 +153,14 @@ class MyTrainer(TorchCommander):
         if self.args.suffix:
             weights_dir += '_' + self.args.suffix
         os.makedirs(weights_dir, exist_ok=True)
-        weights_path = os.path.join(weights_dir, f'{epoch}.pth')
         ### WORKAROUND BEGIN
         if self.model_name == 'yolo':
             model.save_darknet_weights(os.path.join(weights_dir, f'{epoch}.darknet'))
+        if self.model_name == 'effdet':
+            weights_dir = os.path.join(weights_dir, self.args.depth)
         ### WORKAROUND END
+
+        weights_path = os.path.join(weights_dir, f'{epoch}.pth')
         torch.save(state, weights_path)
         return weights_path
 
@@ -191,7 +196,9 @@ class MyTrainer(TorchCommander):
             batch_size=self.args.batch_size,
             num_workers=self.args.workers,
         )
-        return train_loader, None
+        return {
+            'train': train_loader,
+        }
 
 
     def arg_effdet(self, parser):
@@ -201,23 +208,22 @@ class MyTrainer(TorchCommander):
         self.model_name = 'effdet'
 
     def run_effdet(self):
-        cfg = get_efficientdet_config(f'tf_efficientdet_{self.args.model_name[-2:]}')
+        cfg = get_efficientdet_config(f'tf_efficientdet_{self.args.depth}')
         cfg.num_classes = 6
         model = EfficientDet(cfg)
         bench = DetBenchTrain(model).to(self.device)
+        loaders = self.create_loaders('effdet', SIZE_BY_DEPTH[self.args.depth])
 
-        train_loader, _ = self.create_loaders('effdet', SIZE_BY_MODEL[self.model_name])
         def eval_fn(inputs, labels):
             inputs = inputs.to(self.device)
             labels['bbox'] = labels['bbox'].to(self.device)
             labels['cls'] = labels['cls'].to(self.device)
             loss = bench(inputs, labels)
-            return loss, None
+            return loss['loss'], None
 
         self.train_model(
             model,
-            train_loader,
-            test_loader,
+            loaders,
             eval_fn, {
                 # metrics_fn
             })
@@ -227,21 +233,19 @@ class MyTrainer(TorchCommander):
 
     def run_yolo(self):
         model = Darknet().to(self.device)
-        train_loader, test_loader = self.create_loaders('yolo', 512)
+        loaders = self.create_loaders('yolo', 512)
 
         def eval_fn(inputs, labels):
             for idx, ll in enumerate(labels):
                 ll[:, 0] = idx
-            labels = labels.view(-1, 6) # batch x [batch_idx, cls_id, x, y, w, h]
             inputs = inputs.to(self.device)
-            labels = labels.to(self.device)
+            labels = labels.view(-1, 6).to(self.device) # batch x [batch_idx, cls_id, x, y, w, h]
             loss, outputs = model(inputs, labels)
             return loss, outputs
 
         self.train_model(
             model,
-            train_loader,
-            test_loader,
+            loaders,
             eval_fn, {
                 # metrics_fn
             })

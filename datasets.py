@@ -264,25 +264,36 @@ if __name__ == '__main__':
     # exit(0)
 
     augs = [
-        # A.RandomCrop(width=100, height=100),
-        A.RandomResizedCrop(width=512, height=512, scale=[0.1, 0.2]),
-        A.HorizontalFlip(p=0.5),
-        A.GaussNoise(p=0.2),
-        A.OneOf([
-            A.MotionBlur(p=.2),
-            A.MedianBlur(blur_limit=3, p=0.1),
-            A.Blur(blur_limit=3, p=0.1),
-        ], p=0.2),
-        A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.2, rotate_limit=5, p=0.5),
-        # A.PiecewiseAffine(p=0.2),
-        A.OneOf([
-            A.CLAHE(clip_limit=2),
-            A.Emboss(),
-            A.RandomBrightnessContrast(),
-        ], p=0.3),
-        A.HueSaturationValue(p=0.3),
+        A.RandomResizedCrop(width=512, height=512, scale=[0.5, 0.5]),
     ]
 
     ds = YOLODataset(normalized=False)
     ds.apply_augs(augs)
-    ds.validate()
+
+    for (X, Y) in ds:
+        print('ok')
+        # t = torch.from_numpy(img).permute(2, 0, 1)
+        img = tensor_to_pil(X)
+        img.save('tmp/org.png')
+        bb = Y[:, 2:].numpy() * 512
+        print(bb)
+        x, y, w, h = bb.T
+        print(x)
+        print(y)
+        print(w)
+        print(h)
+        bb = np.array([
+            x - w/2,
+            y - h/2,
+            x + w/2,
+            y + h/2,
+        ]).T
+        print(bb)
+        # t = torch.from_numpy((X * 255).astype(np.uint8))
+        # print(t.shape)
+        t = draw_bounding_boxes(image=X, boxes=torch.from_numpy(bb))
+        img = tensor_to_pil(t)
+        img.save('tmp/aug.png')
+
+        print('ok')
+        break
