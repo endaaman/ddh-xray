@@ -1,4 +1,5 @@
 import os
+import io
 import json
 import yaml
 import time
@@ -13,8 +14,8 @@ import torch
 import torch.optim as optim
 from torchvision import transforms
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 import albumentations as A
-# from effdet import EfficientDet, FocalLoss, EFFDET_PARAMS
 from effdet import EfficientDet, DetBenchTrain, get_efficientdet_config
 from effdet.efficientdet import HeadNet
 
@@ -33,6 +34,8 @@ SIZE_BY_DEPTH = {
     'd5': 128 * 10,
     'd6': 128 * 12,
     'd7': 128 * 14,
+    'yolo': 512,
+    'ssd': 300.
 }
 
 
@@ -48,8 +51,9 @@ class MyTrainer(TorchCommander):
         parser.add_argument('-p', '--period-save-weight', type=int, default=10)
         parser.add_argument('-n', '--no-show-fig', action='store_true')
 
-    def train_model(self, model, loaders, eval_fn, additional_metrics={}):
+    def train_model(self, model, loaders, eval_fn, additional_metrics={}, save_hook=None):
         assert self.model_name
+        assert self.type_name
         matplotlib.use('Agg')
         train_loader = loaders.get('train')
         val_loader = loaders.get('val')
@@ -60,18 +64,19 @@ class MyTrainer(TorchCommander):
         print('Starting training')
         train_history = {'loss':[], **{k:[] for k in additional_metrics.keys()}}
         val_history = {'loss':[], **{k:[] for k in additional_metrics.keys()}}
+        writer = SummaryWriter(log_dir='log/', filename_suffix=self.type_name + '_' + self.model_name)
         for epoch in range(1, self.args.epoch + 1):
             header = f'[{epoch}/{self.args.epoch}] '
 
             lr = optimizer.param_groups[0]['lr']
-            now = datetime.datetime.now().strftime('%H:%M:%S')
-            print(f'{header}Starting lr={lr:.7f} ({now})')
+            now = datetime.datetime.now().strftime('%h:%m:%s')
+            print(f'{header}starting lr={lr:.7f} ({now})')
 
             train_metrics = {'loss':[], **{k:[] for k in additional_metrics.keys()}}
             val_metrics = {'loss':[], **{k:[] for k in additional_metrics.keys()}}
 
             train_start_time = time.perf_counter()
-            t = tqdm(train_loader, leave=False)
+            t = tqdm(train_loader, leave=false)
             for (inputs, labels) in t:
                 optimizer.zero_grad()
                 loss, outputs = eval_fn(inputs, labels)
@@ -94,7 +99,7 @@ class MyTrainer(TorchCommander):
             #* validate
             if val_loader:
                 model.eval()
-                with torch.set_grad_enabled(False):
+                with torch.set_grad_enabled(false):
                     for i, (inputs, labels) in enumerate(val_loader):
                         loss, outputs = eval_fn(inputs, labels)
                         # outputs = outputs.cpu().detach()
@@ -114,14 +119,14 @@ class MyTrainer(TorchCommander):
                 fig = plt.figure(figsize=(10, 5))
                 for i, (k, train_values) in enumerate(train_history.items()):
                     ax = fig.add_subplot(1, len(train_history.keys()), i+1)
-                    ax.get_xaxis().set_major_locator(ticker.MaxNLocator(integer=True))
+                    ax.get_xaxis().set_major_locator(ticker.maxnlocator(integer=true))
                     ax.set_title(k)
                     ax.plot(x_axis, train_values[fisrt_idx:], label=f'train')
                     if val_loader:
                         val_values = val_history[k]
                         ax.plot(x_axis, val_values[fisrt_idx:], label=f'val')
                     ax.legend()
-                fig_path = f'out/training_curve_{self.model_name}.png'
+                fig_path = f'out/training_curve_{full_name}.png'
                 plt.savefig(fig_path)
 
                 if epoch == 2 and not self.args.no_show_fig:
@@ -130,37 +135,41 @@ class MyTrainer(TorchCommander):
                 plt.clf()
                 plt.close()
 
+            for (tag, metrics) in (('train', train_metrics), ('val', val_metrics)):
+                for k, v in metrics.items():
+                    writer.add_scalar(f'{k}/{tag}', v, e-1)
+
             #* save weights
             if epoch % self.args.period_save_weight == 0:
-                weights_path = self.save_weights(model, epoch, train_history, val_history)
+                weights_path = self.save_weights(model, epoch, train_history, val_history, save_hook)
                 print(f'{header}Saved "{weights_path}"')
 
             scheduler.step(train_metrics['loss'][-1])
             # scheduler.step()
             print()
 
-    def save_weights(self, model, epoch, train_history, val_history):
-        state = {
+    def save_weights(self, model, epoch, train_history, val_history, save_hook=None):
+        weights_dir = f'weights/{self.type_name}/{self.model_name}'
+        if self.args.suffix:
+            weights_dir += '_' + self.args.suffix
+        os.makedirs(weights_dir, exist_ok=True)
+
+        weights_name = f'{epoch}.pth'
+        weights = {
+            'type_name': self.type_name,
             'model_name': self.model_name,
             'suffix': self.args.suffix,
             'epoch': epoch,
             'args': self.args,
-            'state_dict': get_state_dict(model),
+            'state_dict': value,
             'train_history': train_history,
             'val_history': val_history,
         }
-        weights_dir = f'weights/{self.model_name}'
-        if self.args.suffix:
-            weights_dir += '_' + self.args.suffix
-        os.makedirs(weights_dir, exist_ok=True)
-        ### WORKAROUND BEGIN
-        if self.model_name == 'yolo':
-            model.save_darknet_weights(os.path.join(weights_dir, f'{epoch}.darknet'))
-        if self.model_name == 'effdet':
-            weights_dir = os.path.join(weights_dir, self.args.depth)
-        ### WORKAROUND END
 
-        weights_path = os.path.join(weights_dir, f'{epoch}.pth')
+        if callable(save_hook):
+            weights_dir, weights_name, weights = save_hook(weights_dir, weights_name, weights)
+
+        weights_path = os.path.join(weights_dir, weights_name)
         torch.save(state, weights_path)
         return weights_path
 
@@ -205,7 +214,8 @@ class MyTrainer(TorchCommander):
         parser.add_argument('-d', '--depth', default='d0', choices=list(SIZE_BY_DEPTH.keys()))
 
     def pre_effdet(self):
-        self.model_name = 'effdet'
+        self.type_name = 'effdet'
+        self.model_name = self.args.depth
 
     def run_effdet(self):
         cfg = get_efficientdet_config(f'tf_efficientdet_{self.args.depth}')
@@ -226,10 +236,10 @@ class MyTrainer(TorchCommander):
             loaders,
             eval_fn, {
                 # metrics_fn
-            })
+            }, save_hook)
 
     def pre_yolo(self):
-        self.model_name = 'yolo'
+        self.type_name = self.model_name = 'yolo'
 
     def run_yolo(self):
         model = Darknet().to(self.device)
@@ -242,6 +252,12 @@ class MyTrainer(TorchCommander):
             labels = labels.view(-1, 6).to(self.device) # batch x [batch_idx, cls_id, x, y, w, h]
             loss, outputs = model(inputs, labels)
             return loss, outputs
+
+        def save_hook(weights_dir, weights_name, weights):
+            name = weights['epoch'] + '.darknet'
+            model.save_darknet_weights(os.path.join(weights_dir, name))
+            weights['darknet_weight'] = name
+            return weights_dir, weights_name, weights
 
         self.train_model(
             model,
