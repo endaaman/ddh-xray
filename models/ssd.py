@@ -1,9 +1,11 @@
-from torch import nn
-from utils import *
-import torch.nn.functional as F
 from math import sqrt
-from itertools import product as product
+from itertools import product
+
+from torch import nn
+import torch.nn.functional as F
 import torchvision
+
+from .ssd_utils import *
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -547,7 +549,8 @@ class MultiBoxLoss(nn.Module):
         self.alpha = alpha
 
         self.smooth_l1 = nn.L1Loss()
-        self.cross_entropy = nn.CrossEntropyLoss(reduce=False)
+        # self.cross_entropy = nn.CrossEntropyLoss(reduce=False)
+        self.cross_entropy = nn.CrossEntropyLoss(reduction='none')
 
     def forward(self, predicted_locs, predicted_scores, boxes, labels):
         """

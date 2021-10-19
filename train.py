@@ -34,8 +34,6 @@ SIZE_BY_DEPTH = {
     'd5': 128 * 10,
     'd6': 128 * 12,
     'd7': 128 * 14,
-    'yolo': 512,
-    'ssd': 300.
 }
 
 
@@ -57,10 +55,8 @@ class MyTrainer(TorchCommander):
         matplotlib.use('Agg')
         train_loader = loaders.get('train')
         val_loader = loaders.get('val')
-
         optimizer = optim.Adam(model.parameters(), lr=self.args.lr)
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2)
-
         print('Starting training')
         train_history = {'loss':[], **{k:[] for k in additional_metrics.keys()}}
         val_history = {'loss':[], **{k:[] for k in additional_metrics.keys()}}
