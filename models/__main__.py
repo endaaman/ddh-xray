@@ -14,9 +14,9 @@ if __name__ == '__main__':
     # labels = torch.zeros([2, 8732])
     # boxes = torch.zeros([2, 8732, 4])
 
-    labels = torch.zeros([2, 8])
-    boxes = torch.zeros([2, 8, 4])
+    labels = torch.ones([2, 19])
+    boxes = torch.zeros([2, 19, 4])
 
     criterion = MultiBoxLoss(priors_cxcy=model.priors_cxcy)
-    loss = criterion(predicted_locs, predicted_scores, predicted_locs, labels)  # scalar
+    loss = criterion(predicted_locs, predicted_scores, boxes, labels)  # scalar
     print(loss)

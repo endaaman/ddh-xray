@@ -19,9 +19,10 @@ import albumentations as A
 from effdet import EfficientDet, DetBenchTrain, get_efficientdet_config
 from effdet.efficientdet import HeadNet
 
-from datasets import EffdetDataset, YOLODataset
+from datasets import ROIDataset
 from utils import get_state_dict
-from models import Darknet
+from models import Darknet, SSD300
+from models.ssd import MultiBoxLoss
 from endaaman import TorchCommander
 
 
@@ -72,7 +73,7 @@ class MyTrainer(TorchCommander):
             val_metrics = {'loss':[], **{k:[] for k in additional_metrics.keys()}}
 
             train_start_time = time.perf_counter()
-            t = tqdm(train_loader, leave=false)
+            t = tqdm(train_loader, leave=False)
             for (inputs, labels) in t:
                 optimizer.zero_grad()
                 loss, outputs = eval_fn(inputs, labels)
@@ -170,12 +171,9 @@ class MyTrainer(TorchCommander):
         return weights_path
 
     def create_loaders(self, target, image_size):
-        if target not in ['effdet', 'yolo']:
+        if target not in ['effdet', 'yolo', 'ssd']:
             raise ValueError(f'Invalid target: {target}')
-        train_dataset = {
-            'effdet': EffdetDataset,
-            'yolo': YOLODataset,
-        }[target]()
+        train_dataset = ROIDataset(target=target, is_training=True)
 
         if not self.args.no_aug:
             train_dataset.apply_augs([
@@ -239,6 +237,7 @@ class MyTrainer(TorchCommander):
 
     def run_yolo(self):
         model = Darknet().to(self.device)
+        model.train()
         loaders = self.create_loaders('yolo', 512)
 
         def eval_fn(inputs, labels):
@@ -254,6 +253,29 @@ class MyTrainer(TorchCommander):
             model.save_darknet_weights(os.path.join(weights_dir, name))
             weights['darknet_weight'] = name
             return weights_dir, weights_name, weights
+
+        self.train_model(
+            model,
+            loaders,
+            eval_fn, {
+                # metrics_fn
+            })
+
+    def pre_ssd(self):
+        self.type_name = self.model_name = 'ssd'
+
+    def run_ssd(self):
+        model = SSD300(n_classes=7).to(self.device)
+        loaders = self.create_loaders('ssd', 300)
+        criterion = MultiBoxLoss(priors_cxcy=model.priors_cxcy)
+
+        def eval_fn(inputs, labels):
+            inputs = inputs.to(self.device)
+            bboxes = [b.to(self.device) for b in labels[0]]
+            clss = [c.to(self.device) for c in labels[1]]
+            predicted_locs, predicted_scores = model(inputs)
+            loss = criterion(predicted_locs, predicted_scores, bboxes, clss)
+            return loss, None
 
         self.train_model(
             model,

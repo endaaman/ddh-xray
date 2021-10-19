@@ -96,21 +96,40 @@ def pad_targets(bboxes, labels, size, fill=(0, 0)):
     pad_labels[0:labels.shape[0]] = labels
     return pad_bboxes, pad_labels
 
+def xyxy_to_xywh(bb, w, h):
+    ww = (bb[:, 2] - bb[:, 0])
+    hh = (bb[:, 3] - bb[:, 1])
+    xx = bb[:, 0] + ww * 0.5
+    yy = bb[:, 1] + hh * 0.5
+    bb = np.stack([xx, yy, ww, hh], axis=1)
+    bb[:, [0, 2]] /= w
+    bb[:, [1, 3]] /= h
+    return bb
 
-class BaseDataset(Dataset):
-    def __init__(self, is_training=True, normalized=True):
+
+class ROIDataset(Dataset):
+    def __init__(self, target, is_training=True, normalized=True):
+        adapter_table = {
+            'effdet': self.effdet_adapter,
+            'yolo': self.yolo_adapter,
+            'ssd': self.ssd_adapter,
+        }
+        if target not in list(adapter_table.keys()):
+            raise ValueError(f'Invalid target: {target}')
+        self.target = target
         self.is_training = is_training
         self.normalized = normalized
-        self.augmentation = None
+
+        self.adapter = adapter_table[target]
         self.items = self.load_items()
         self.apply_augs([])
         self.horizontal_filpper_index = None
 
     def load_items(self):
         if self.is_training:
-            base_dir = 'data/yolo/train'
+            base_dir = 'data/roi/train'
         else:
-            base_dir = 'data/yolo/test'
+            base_dir = 'data/roi/test'
 
         items = []
         image_paths = sorted(glob.glob(os.path.join(base_dir, 'image', '*.jpg')))
@@ -156,7 +175,35 @@ class BaseDataset(Dataset):
     def __len__(self):
         return len(self.items)
 
-    def aug(self, item):
+    def effdet_adapter(self, images, bboxes, labels):
+        # use yxyx
+        bboxes = bboxes[:, [1, 0, 3, 2]]
+        bboxes, labels = pad_targets(bboxes, labels, 6)
+
+        labels = {
+            'bbox': torch.FloatTensor(bboxes),
+            'cls': torch.FloatTensor(labels),
+        }
+        return images, labels
+
+    def yolo_adapter(self, images, bboxes, labels):
+        bboxes = xyxy_to_xywh(bboxes, w=images.shape[2], h=images.shape[1])
+        bboxes, labels = pad_targets(bboxes, labels, 6, fill=(0, -1))
+        batches = np.zeros([6, 1])
+        # yolo targets: [batch_idx, class_id, x, y, w, h]
+        labels = np.concatenate([batches, labels[:, None], bboxes], axis=1)
+        return images, torch.FloatTensor(labels)
+
+    def ssd_adapter(self, images, bboxes, labels):
+        # bboxes = xyxy_to_xywh(bboxes, w=images.shape[2], h=images.shape[1])
+        bboxes[:, [0, 2]] /= images.shape[2]
+        bboxes[:, [1, 3]] /= images.shape[1]
+        bboxes = [b for b in bboxes]
+        labels = [l for l in labels]
+        return images, (bboxes, labels)
+
+    def __getitem__(self, idx):
+        item = self.items[idx]
         with warnings.catch_warnings():
             warnings.simplefilter('ignore')
             result = self.albu(
@@ -164,7 +211,7 @@ class BaseDataset(Dataset):
                 bboxes=item.bb.values[:, :4],
                 labels=item.bb.values[:, 4],
             )
-        x = result['image']
+        images = result['image']
         bboxes = np.array(result['bboxes'])
         labels = np.array(result['labels'])
         if self.horizontal_filpper_index is not None:
@@ -172,45 +219,8 @@ class BaseDataset(Dataset):
             if flipped:
                 labels -= 3
                 labels[labels < 1] += 6
-        return x, bboxes, labels
 
-
-class EffdetDataset(BaseDataset):
-    def __getitem__(self, idx):
-        item = self.items[idx]
-        x, bboxes, labels = self.aug(item)
-        # use yxyx
-        bboxes = bboxes[:, [1, 0, 3, 2]]
-        bboxes, labels = pad_targets(bboxes, labels, 6)
-
-        y = {
-            'bbox': torch.FloatTensor(bboxes),
-            'cls': torch.FloatTensor(labels),
-        }
-        return x, y
-
-
-def xyxy_to_yolo(bb, w, h):
-    ww = (bb[:, 2] - bb[:, 0])
-    hh = (bb[:, 3] - bb[:, 1])
-    xx = bb[:, 0] + ww * 0.5
-    yy = bb[:, 1] + hh * 0.5
-    bb = np.stack([xx, yy, ww, hh], axis=1)
-    bb[:, [0, 2]] /= w
-    bb[:, [1, 3]] /= h
-    return bb
-
-class YOLODataset(BaseDataset):
-    def __getitem__(self, idx):
-        item = self.items[idx]
-        x, bboxes, labels = self.aug(item)
-        bboxes = xyxy_to_yolo(bboxes, w=x.shape[2], h=x.shape[1])
-        bboxes, labels = pad_targets(bboxes, labels, 6, fill=(0, -1))
-        batches = np.zeros([6, 1])
-        # yolo targets: [batch_idx, class_id, x, y, w, h]
-        y = np.concatenate([batches, labels[:, None], bboxes], axis=1)
-        y = torch.FloatTensor(y)
-        return x, y
+        return self.adapter(images, bboxes, labels)
 
 
 class ROICroppedDataset(Dataset):
@@ -267,7 +277,7 @@ if __name__ == '__main__':
         A.RandomResizedCrop(width=512, height=512, scale=[0.5, 0.5]),
     ]
 
-    ds = YOLODataset(normalized=False)
+    ds = ROIDataset('yolo', normalized=False)
     ds.apply_augs(augs)
 
     for (X, Y) in ds:

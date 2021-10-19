@@ -2,5 +2,6 @@ data
 results/
 weights/
 out/
+log/
 tmp/
 lightning_logs/
