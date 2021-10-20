@@ -61,7 +61,7 @@ class MyTrainer(TorchCommander):
         train_loader = loaders.get('train')
         val_loader = loaders.get('val')
         optimizer = optim.Adam(model.parameters(), lr=self.args.lr)
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10)
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3)
         print('Starting training')
         train_history = {'loss':[], **{k:[] for k in additional_metrics.keys()}}
         val_history = {'loss':[], **{k:[] for k in additional_metrics.keys()}}
@@ -127,7 +127,7 @@ class MyTrainer(TorchCommander):
                         val_values = val_history[k]
                         ax.plot(x_axis, val_values[fisrt_idx:], label=f'val')
                     ax.legend()
-                fig_path = f'tmp/training_curve_{self.type_name}_{self.model_name}.png'
+                fig_path = f'tmp/training_curve_{full_name}.png'
                 plt.savefig(fig_path)
 
                 if epoch == 2 and not self.args.no_show_fig:
@@ -152,7 +152,7 @@ class MyTrainer(TorchCommander):
 
     def save_weights(self, model, epoch, train_history, val_history, save_hook=None):
         weights_dir = f'weights/{self.model_name}'
-        if self.sub_name or self.sub_name == self.model_name:
+        if self.sub_name and self.sub_name == self.model_name:
             weights_dir = os.path.join(weights_dir, self.sub_name)
 
         if self.args.suffix:
@@ -235,6 +235,7 @@ class MyTrainer(TorchCommander):
         self.sub_name = self.args.depth
 
     def run_effdet(self):
+        model = self.create_model()
         bench = DetBenchTrain(model).to(self.device)
         loaders = self.create_loaders('effdet', SIZE_BY_DEPTH[self.args.depth])
 
@@ -278,7 +279,9 @@ class MyTrainer(TorchCommander):
             loaders,
             eval_fn, {
                 # metrics_fn
-            })
+            },
+            # save_hook
+        )
 
     def pre_ssd(self):
         self.model_name = self.sub_name = 'ssd'
