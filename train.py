@@ -50,9 +50,13 @@ class MyTrainer(TorchCommander):
         parser.add_argument('-p', '--period-save-weight', type=int, default=10)
         parser.add_argument('-n', '--no-show-fig', action='store_true')
 
+    def pre_common(self):
+        self.sub_name = ''
+
     def train_model(self, model, loaders, eval_fn, additional_metrics={}, save_hook=None):
+        assert self.sub_name
         assert self.model_name
-        assert self.type_name
+        full_name = self.model_name + '_' + self.sub_name if self.sub_name else self.model_name
         matplotlib.use('Agg')
         train_loader = loaders.get('train')
         val_loader = loaders.get('val')
@@ -61,7 +65,7 @@ class MyTrainer(TorchCommander):
         print('Starting training')
         train_history = {'loss':[], **{k:[] for k in additional_metrics.keys()}}
         val_history = {'loss':[], **{k:[] for k in additional_metrics.keys()}}
-        writer = SummaryWriter(log_dir='log/', filename_suffix=self.type_name + '_' + self.model_name)
+        writer = SummaryWriter(log_dir='log/', filename_suffix=full_name)
         for epoch in range(1, self.args.epoch + 1):
             header = f'[{epoch}/{self.args.epoch}] '
 
@@ -146,19 +150,22 @@ class MyTrainer(TorchCommander):
             print()
 
     def save_weights(self, model, epoch, train_history, val_history, save_hook=None):
-        weights_dir = f'weights/{self.type_name}/{self.model_name}'
+        weights_dir = f'weights/{self.model_name}'
+        if self.sub_name or self.sub_name == self.model_name:
+            weights_dir = os.path.join(weights_dir, self.sub_name)
+
         if self.args.suffix:
             weights_dir += '_' + self.args.suffix
         os.makedirs(weights_dir, exist_ok=True)
 
         weights_name = f'{epoch}.pth'
         weights = {
-            'type_name': self.type_name,
             'model_name': self.model_name,
+            'sub_name': self.sub_name,
             'suffix': self.args.suffix,
             'epoch': epoch,
             'args': self.args,
-            'state_dict': value,
+            'state_dict': get_state_dict(model),
             'train_history': train_history,
             'val_history': val_history,
         }
@@ -167,8 +174,22 @@ class MyTrainer(TorchCommander):
             weights_dir, weights_name, weights = save_hook(weights_dir, weights_name, weights)
 
         weights_path = os.path.join(weights_dir, weights_name)
-        torch.save(state, weights_path)
+        torch.save(weights, weights_path)
         return weights_path
+
+    def create_model(self):
+        if self.model_name == 'yolo':
+            model = Darknet()
+        elif self.model_name == 'effdet':
+            cfg = get_efficientdet_config(f'tf_efficientdet_{self.sub_name}')
+            cfg.num_classes = 6
+            model = EfficientDet(cfg)
+        elif self.model_name == 'ssd':
+            model = SSD300(n_classes=7)
+        else:
+            raise ValueError(f'Ivalid model_name: {self.model_name}')
+
+        return model.to(self.device).train()
 
     def create_loaders(self, target, image_size):
         if target not in ['effdet', 'yolo', 'ssd']:
@@ -208,13 +229,10 @@ class MyTrainer(TorchCommander):
         parser.add_argument('-d', '--depth', default='d0', choices=list(SIZE_BY_DEPTH.keys()))
 
     def pre_effdet(self):
-        self.type_name = 'effdet'
-        self.model_name = self.args.depth
+        self.model_name = 'effdet'
+        self.sub_name = self.args.depth
 
     def run_effdet(self):
-        cfg = get_efficientdet_config(f'tf_efficientdet_{self.args.depth}')
-        cfg.num_classes = 6
-        model = EfficientDet(cfg)
         bench = DetBenchTrain(model).to(self.device)
         loaders = self.create_loaders('effdet', SIZE_BY_DEPTH[self.args.depth])
 
@@ -233,11 +251,10 @@ class MyTrainer(TorchCommander):
             }, save_hook)
 
     def pre_yolo(self):
-        self.type_name = self.model_name = 'yolo'
+        self.model_name = self.sub_name = 'yolo'
 
     def run_yolo(self):
-        model = Darknet().to(self.device)
-        model.train()
+        model = self.create_model()
         loaders = self.create_loaders('yolo', 512)
 
         def eval_fn(inputs, labels):
@@ -262,10 +279,10 @@ class MyTrainer(TorchCommander):
             })
 
     def pre_ssd(self):
-        self.type_name = self.model_name = 'ssd'
+        self.model_name = self.sub_name = 'ssd'
 
     def run_ssd(self):
-        model = SSD300(n_classes=7).to(self.device)
+        model = self.create_model()
         loaders = self.create_loaders('ssd', 300)
         criterion = MultiBoxLoss(priors_cxcy=model.priors_cxcy)
 
@@ -284,9 +301,16 @@ class MyTrainer(TorchCommander):
                 # metrics_fn
             })
 
-    def run_fake_weights(self):
-        model = self.create_model(self.args.network)
-        weights_path = self.save_weights(model, 0)
+    def arg_fake(self, parser):
+        parser.add_argument('-m', '--model-name', required=True)
+        parser.add_argument('-d', '--depth', default='d0', choices=list(SIZE_BY_DEPTH.keys()))
+
+    def run_fake(self):
+        self.model_name = self.sub_name = self.args.model_name
+        if self.model_name == 'effdet':
+            self.sub_name = self.args.depth
+        model = self.create_model()
+        weights_path = self.save_weights(model, 0, {}, {})
         print(weights_path)
 
 MyTrainer().run()

@@ -41,12 +41,19 @@ LABEL_TO_STR = {
 }
 
 class EffdetPredictor:
-    def __init__(self, bench):
+    def __init__(self, bench, model):
         self.bench = bench
+        self.model = model
 
     def __call__(self, inputs):
+        pred_clss, pred_boxes = self.model(inputs)
+        print(len(pred_clss))
+        print(pred_clss[0].shape)
+        print(len(pred_boxes))
+        print(pred_boxes[0].shape)
         t = self.bench(inputs)
-        return t.detach().cpu()
+
+        return t.detach().cpu().type(torch.long)
 
 class YOLOPredictor:
     def __init__(self, model, conf_thres, nms_thres):
@@ -66,7 +73,6 @@ class Predictor(TorchCommander):
     def create_predictor(self):
         # weights = torch.load(self.args.weights)
         weights = torch.load(self.args.weights, map_location=lambda storage, loc: storage)
-        print(weights.keys())
         model_name = weights['model_name']
 
         if model_name == 'effdet':
@@ -77,7 +83,7 @@ class Predictor(TorchCommander):
             model.load_state_dict(weights['state_dict'])
             bench = DetBenchPredict(model).to(self.device)
             bench.eval()
-            return EffdetPredictor(bench)
+            return EffdetPredictor(bench, model)
         elif model_name == 'yolo':
             model = Darknet()
             model = model.to(self.device)
@@ -92,6 +98,7 @@ class Predictor(TorchCommander):
     def arg_common(self, parser):
         parser.add_argument('-w', '--weights', type=str, required=True)
         parser.add_argument('-b', '--batch-size', type=int, default=16)
+        parser.add_argument('-o', '--open', action='store_true')
         parser.add_argument('--conf_thres', type=float, default=0.2, help='object confidence threshold')
         parser.add_argument('--nms_thres', type=float, default=0.1, help='iou thresshold for non-maximum suppression')
 
@@ -118,7 +125,7 @@ class Predictor(TorchCommander):
             outputs.append(output_tensor)
             t.set_description(f'{start} ~ {start + bs} / {len(imgs)}')
             t.refresh()
-        outputs = torch.cat(outputs).type(torch.long)
+        outputs = torch.cat(outputs)
 
         results = []
         for img, bboxes in zip(imgs, outputs):
@@ -141,19 +148,20 @@ class Predictor(TorchCommander):
 
 
     def arg_dir(self, parser):
-        parser.add_argument('-i', '--input-dir', type=str, required=True)
-        parser.add_argument('-o', '--output-dir', type=str, default='tmp')
+        parser.add_argument('-s', '--src-dir', type=str, required=True)
+        parser.add_argument('-d', '--dest-dir', type=str, default='tmp')
 
     def run_dir(self):
-        os.makedirs(self.args.output_dir, exist_ok=True)
+        os.makedirs(self.args.dest_dir, exist_ok=True)
         predictor = create_predictor()
 
         image_size = SIZE_BY_NETWORK.get(state['args'].network, 512)
         imgs = []
         names = []
-        for p in glob(os.path.join(self.args.input_dir, '*')):
-            imgs.append(Image.open(p))
-            names.append(os.path.basename(p))
+        for ext in ('png', 'jpg'):
+            for p in glob(os.path.join(self.args.src_dir, f'*.{ext}')):
+                imgs.append(Image.open(p))
+                names.append(os.path.basename(p))
 
         if len(imgs) < 1:
             print('empty')
@@ -161,31 +169,32 @@ class Predictor(TorchCommander):
         results = self.detect_images(bench, imgs, image_size)
 
         for name, result in tqdm(zip(names, results)):
-            p = os.path.join(self.args.output_dir, name)
+            p = os.path.join(self.args.dest_dir, name)
             result.save(p)
         print('done')
 
     def arg_single(self, parser):
-        parser.add_argument('-i', '--input', type=str, required=True)
-        parser.add_argument('-o', '--output-dir', type=str, default='tmp')
+        parser.add_argument('-s', '--src', type=str, required=True)
+        parser.add_argument('-d', '--dest-dir', type=str, default='tmp')
 
     def run_single(self):
-        dest_dir = self.args.output_dir
+        dest_dir = self.args.dest_dir
         os.makedirs(dest_dir, exist_ok=True)
         predictor = self.create_predictor()
 
         img_size = 512
-        img = Image.open(self.args.input)
+        img = Image.open(self.args.src)
         img = self.detect_images(predictor, [img])[0]
 
         # model_id = state['args'].network + '_e' + str(state['epoch'])
         # dest_dir = os.path.join(self.args.dest, model_id)
-        file_name = os.path.basename(os.path.abspath(self.args.input))
+        file_name = os.path.basename(os.path.abspath(self.args.src))
         os.makedirs(dest_dir, exist_ok=True)
         dest_path = os.path.join(dest_dir, file_name)
         img.save(dest_path)
         print(f'saved {dest_path}')
-        os.system(f'xdg-open {dest_path}')
+        if self.args.open:
+            os.system(f'xdg-open {dest_path}')
 
 
 Predictor().run()
