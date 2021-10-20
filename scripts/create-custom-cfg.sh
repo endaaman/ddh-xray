@@ -1,6 +1,15 @@
 #!/bin/bash
 
 NUM_CLASSES=$1
+if [ -z $NUM_CLASSES ]; then
+  echo "Invalid arg: NUM_CLASSES is needed"
+  exit 1
+fi
+
+DEST=$2
+if [ -z $DEST ]; then
+  DEST=cfg/yolo_v3.cfg
+fi
 
 echo "[net]
 # Testing
@@ -659,4 +668,4 @@ num=9
 jitter=.3
 ignore_thresh = .7
 truth_thresh = 1
-random=1" > cfg/yolo_v3.cfg
+random=1" > $DEST
