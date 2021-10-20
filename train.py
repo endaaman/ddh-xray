@@ -61,7 +61,7 @@ class MyTrainer(TorchCommander):
         train_loader = loaders.get('train')
         val_loader = loaders.get('val')
         optimizer = optim.Adam(model.parameters(), lr=self.args.lr)
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2)
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10)
         print('Starting training')
         train_history = {'loss':[], **{k:[] for k in additional_metrics.keys()}}
         val_history = {'loss':[], **{k:[] for k in additional_metrics.keys()}}
@@ -70,7 +70,7 @@ class MyTrainer(TorchCommander):
             header = f'[{epoch}/{self.args.epoch}] '
 
             lr = optimizer.param_groups[0]['lr']
-            now = datetime.datetime.now().strftime('%h:%m:%s')
+            now = datetime.datetime.now().strftime('%H:%M:%S')
             print(f'{header}starting lr={lr:.7f} ({now})')
 
             train_metrics = {'loss':[], **{k:[] for k in additional_metrics.keys()}}
@@ -100,7 +100,7 @@ class MyTrainer(TorchCommander):
             #* validate
             if val_loader:
                 model.eval()
-                with torch.set_grad_enabled(false):
+                with torch.set_grad_enabled(False):
                     for i, (inputs, labels) in enumerate(val_loader):
                         loss, outputs = eval_fn(inputs, labels)
                         # outputs = outputs.cpu().detach()
@@ -120,14 +120,14 @@ class MyTrainer(TorchCommander):
                 fig = plt.figure(figsize=(10, 5))
                 for i, (k, train_values) in enumerate(train_history.items()):
                     ax = fig.add_subplot(1, len(train_history.keys()), i+1)
-                    ax.get_xaxis().set_major_locator(ticker.maxnlocator(integer=true))
+                    ax.get_xaxis().set_major_locator(ticker.MaxNLocator(integer=True))
                     ax.set_title(k)
                     ax.plot(x_axis, train_values[fisrt_idx:], label=f'train')
                     if val_loader:
                         val_values = val_history[k]
                         ax.plot(x_axis, val_values[fisrt_idx:], label=f'val')
                     ax.legend()
-                fig_path = f'out/training_curve_{full_name}.png'
+                fig_path = f'tmp/training_curve_{self.type_name}_{self.model_name}.png'
                 plt.savefig(fig_path)
 
                 if epoch == 2 and not self.args.no_show_fig:
@@ -136,9 +136,10 @@ class MyTrainer(TorchCommander):
                 plt.clf()
                 plt.close()
 
-            for (tag, metrics) in (('train', train_metrics), ('val', val_metrics)):
+            for (tag, metrics) in (('train', train_history), ('val', val_history)):
                 for k, v in metrics.items():
-                    writer.add_scalar(f'{k}/{tag}', v, e-1)
+                    if len(v) > 0:
+                        writer.add_scalar(f'{k}/{tag}', v[-1], epoch-1)
 
             #* save weights
             if epoch % self.args.period_save_weight == 0:
@@ -191,7 +192,7 @@ class MyTrainer(TorchCommander):
 
         return model.to(self.device).train()
 
-    def create_loaders(self, target, image_size):
+    def create_loaders(self, target, image_size, collate_fn=None):
         if target not in ['effdet', 'yolo', 'ssd']:
             raise ValueError(f'Invalid target: {target}')
         train_dataset = ROIDataset(target=target, is_training=True)
@@ -219,6 +220,7 @@ class MyTrainer(TorchCommander):
             train_dataset,
             batch_size=self.args.batch_size,
             num_workers=self.args.workers,
+            collate_fn=collate_fn
         )
         return {
             'train': train_loader,
@@ -248,7 +250,7 @@ class MyTrainer(TorchCommander):
             loaders,
             eval_fn, {
                 # metrics_fn
-            }, save_hook)
+            })
 
     def pre_yolo(self):
         self.model_name = self.sub_name = 'yolo'
@@ -282,16 +284,27 @@ class MyTrainer(TorchCommander):
         self.model_name = self.sub_name = 'ssd'
 
     def run_ssd(self):
+        def collate_fn(batch):
+            xx = []
+            yy = []
+            for (x, y) in batch:
+                xx.append(x)
+                yy.append(y)
+            return torch.stack(xx), yy
+
         model = self.create_model()
-        loaders = self.create_loaders('ssd', 300)
+        loaders = self.create_loaders('ssd', 300, collate_fn)
         criterion = MultiBoxLoss(priors_cxcy=model.priors_cxcy)
 
         def eval_fn(inputs, labels):
             inputs = inputs.to(self.device)
-            bboxes = [b.to(self.device) for b in labels[0]]
-            clss = [c.to(self.device) for c in labels[1]]
+            bb = []
+            cc = []
+            for b, c in labels:
+                bb.append(b.to(self.device))
+                cc.append(c.to(self.device))
             predicted_locs, predicted_scores = model(inputs)
-            loss = criterion(predicted_locs, predicted_scores, bboxes, clss)
+            loss = criterion(predicted_locs, predicted_scores, bb, cc)
             return loss, None
 
         self.train_model(

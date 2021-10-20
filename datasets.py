@@ -196,11 +196,12 @@ class ROIDataset(Dataset):
 
     def ssd_adapter(self, images, bboxes, labels):
         # bboxes = xyxy_to_xywh(bboxes, w=images.shape[2], h=images.shape[1])
-        bboxes[:, [0, 2]] /= images.shape[2]
-        bboxes[:, [1, 3]] /= images.shape[1]
-        bboxes = [b for b in bboxes]
-        labels = [l for l in labels]
-        return images, (bboxes, labels)
+        if len(bboxes) > 0:
+            bboxes[:, [0, 2]] /= images.shape[2]
+            bboxes[:, [1, 3]] /= images.shape[1]
+        # bboxes = [b for b in bboxes]
+        # labels = [l for l in labels]
+        return images, (torch.from_numpy(bboxes), torch.from_numpy(labels))
 
     def __getitem__(self, idx):
         item = self.items[idx]
