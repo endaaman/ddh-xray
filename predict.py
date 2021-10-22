@@ -13,7 +13,7 @@ from effdet import EfficientDet, DetBenchPredict, get_efficientdet_config
 from effdet.efficientdet import HeadNet
 
 from augmentation import ResizeAugmentation
-from models import Darknet
+from models import YOLOv3
 from models.yolo import non_max_suppression, rescale_boxes
 from utils import pil_to_tensor
 
@@ -92,7 +92,7 @@ class Predictor(TorchCommander):
             bench.eval()
             return EffdetPredictor(bench, model, SIZE_BY_DEPTH[depth])
         elif model_name == 'yolo':
-            model = Darknet()
+            model = YOLOv3()
             model = model.to(self.device)
             ### WORKAROUND BEGIN
             # dp = os.path.join(os.path.dirname(self.args.weights), str(self.weights['epoch']) + '.darknet')

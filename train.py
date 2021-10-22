@@ -21,7 +21,7 @@ from effdet.efficientdet import HeadNet
 
 from datasets import ROIDataset
 from utils import get_state_dict
-from models import Darknet, SSD300
+from models import YOLOv3, SSD300
 from models.ssd import MultiBoxLoss
 from endaaman import TorchCommander
 
@@ -180,7 +180,7 @@ class MyTrainer(TorchCommander):
 
     def create_model(self):
         if self.model_name == 'yolo':
-            model = Darknet()
+            model = YOLOv3()
         elif self.model_name == 'effdet':
             cfg = get_efficientdet_config(f'tf_efficientdet_{self.sub_name}')
             cfg.num_classes = 6

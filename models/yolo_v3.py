@@ -366,11 +366,11 @@ class YOLOLayer(nn.Module):
             return output, total_loss
 
 
-class Darknet(nn.Module):
+class YOLOv3(nn.Module):
     """YOLOv3 object detection model"""
 
     def __init__(self, config_path='cfg/yolo_v3.cfg', img_size=416):
-        super(Darknet, self).__init__()
+        super().__init__()
         self.module_defs = parse_model_config(config_path)
         self.hyperparams, self.module_list = create_modules(self.module_defs)
         self.yolo_layers = [layer[0] for layer in self.module_list if isinstance(layer[0], YOLOLayer)]
@@ -547,7 +547,7 @@ def rescale_boxes(boxes, current_dim, original_shape):
 
 if __name__ == '__main__':
     t = torch.randn(1, 3, 224, 224).float()
-    m = Darknet()
+    m = YOLOv3()
     bb =torch.tensor([
         [1, 0, 0, 0, 0.5, 0.4],
     ])

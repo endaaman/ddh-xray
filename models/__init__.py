@@ -5,7 +5,8 @@ from torch import nn
 from torchvision import transforms, models
 
 from .ssd import SSD300
-from .yolo import Darknet
+from .yolo_v3 import YOLOv3
+from .yolor import Yolor
 
 
 class VGG(nn.Module):
