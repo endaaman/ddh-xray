@@ -6,7 +6,7 @@ from torchvision import transforms, models
 
 from .ssd import SSD300
 from .yolo_v3 import YOLOv3
-from .yolor import Yolor
+from .yolor import Yolor, YOLOv4, yolor_loss
 
 
 class VGG(nn.Module):
