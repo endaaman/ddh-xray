@@ -13,8 +13,8 @@ from effdet import EfficientDet, DetBenchPredict, get_efficientdet_config
 from effdet.efficientdet import HeadNet
 
 from augmentation import ResizeAugmentation
-from models import YOLOv3
-from models.yolo import non_max_suppression, rescale_boxes
+from models import YOLOv3, Yolor
+from models.yolo_v3 import non_max_suppression, rescale_boxes
 from utils import pil_to_tensor
 
 from endaaman import TorchCommander
@@ -65,8 +65,7 @@ class YOLOPredictor:
         return 512
 
     def __call__(self, inputs):
-        tt = self.model(inputs).detach().cpu()
-        tt = non_max_suppression(tt, self.conf_thres, self.nms_thres)
+        tt = self.model.predict(inputs, self.conf_thres, self.nms_thres)
         outputs = []
         for t in tt:
             if t is None:
@@ -76,6 +75,31 @@ class YOLOPredictor:
                 t[:, 4] = t[:, 6]
                 outputs.append(t[:, :5])
         return outputs
+
+
+class YolorPredictor:
+    def __init__(self, model, conf_thres, nms_thres):
+        self.model = model
+        self.conf_thres = conf_thres
+        self.nms_thres = nms_thres
+
+    def get_image_size(self):
+        return 512
+
+    def __call__(self, inputs):
+        tt = self.model.predict(inputs, conf_thres=self.conf_thres, iou_thres=0.213, agnostic_nms=False)
+        outputs = []
+        for det in tt:
+            print(det)
+            outputs.append(det)
+            # import pdb; pdb.set_trace()
+            # if t is None:
+            #     outputs.append(torch.tensor([]))
+            # else:
+            #     t = t.type(torch.long)
+            #     t[:, 4] = t[:, 6]
+            #     outputs.append(t[:, :5])
+        return []
 
 
 class Predictor(TorchCommander):
@@ -100,6 +124,12 @@ class Predictor(TorchCommander):
             model.load_state_dict(self.weights['state_dict'])
             ### WORKAROUND END
             return YOLOPredictor(model, self.args.conf_thres, self.args.nms_thres)
+        elif model_name == 'yolor':
+            model = Yolor().to(self.device)
+            # run once
+            _ = model(torch.ones([1, 3, 512, 512]).type(torch.FloatTensor).to(self.device))
+            model.load_state_dict(self.weights['state_dict'])
+            return YolorPredictor(model, self.args.conf_thres, self.args.nms_thres)
         else:
             raise ValueError(f'Invalid model_name: {model_name}')
 
@@ -107,8 +137,8 @@ class Predictor(TorchCommander):
         parser.add_argument('-w', '--weights', type=str, required=True)
         parser.add_argument('-b', '--batch-size', type=int, default=16)
         parser.add_argument('-o', '--open', action='store_true')
-        parser.add_argument('--conf_thres', type=float, default=0.2, help='object confidence threshold')
-        parser.add_argument('--nms_thres', type=float, default=0.1, help='iou thresshold for non-maximum suppression')
+        parser.add_argument('--conf-thres', type=float, default=0.2)
+        parser.add_argument('--nms-thres', type=float, default=0.1, help='iou thresshold for non-maximum suppression')
 
     def pre_common(self):
         self.font = ImageFont.truetype('/usr/share/fonts/ubuntu/Ubuntu-R.ttf', size=16)

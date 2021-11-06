@@ -378,6 +378,10 @@ class YOLOv3(nn.Module):
         self.seen = 0
         self.header_info = np.array([0, 0, 0, self.seen, 0], dtype=np.int32)
 
+    def predict(self, x, conf_thres, nms_thres):
+        tt = self(x)
+        return non_max_suppression(tt, conf_thres, nms_thres)
+
     def forward(self, x, targets=None):
         img_dim = x.shape[2]
         loss = 0

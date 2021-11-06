@@ -21,7 +21,7 @@ from effdet.efficientdet import HeadNet
 
 from datasets import ROIDataset
 from utils import get_state_dict
-from models import YOLOv3, SSD300
+from models import YOLOv3, SSD300, Yolor, yolor_loss
 from models.ssd import MultiBoxLoss
 from endaaman import TorchCommander
 
@@ -152,7 +152,7 @@ class MyTrainer(TorchCommander):
 
     def save_weights(self, model, epoch, train_history, val_history, save_hook=None):
         weights_dir = f'weights/{self.model_name}'
-        if self.sub_name and self.sub_name == self.model_name:
+        if self.sub_name and (self.sub_name != self.model_name):
             weights_dir = os.path.join(weights_dir, self.sub_name)
 
         if self.args.suffix:
@@ -181,6 +181,8 @@ class MyTrainer(TorchCommander):
     def create_model(self):
         if self.model_name == 'yolo':
             model = YOLOv3()
+        elif self.model_name == 'yolor':
+            model = Yolor(num_classes=7)
         elif self.model_name == 'effdet':
             cfg = get_efficientdet_config(f'tf_efficientdet_{self.sub_name}')
             cfg.num_classes = 6
@@ -283,6 +285,30 @@ class MyTrainer(TorchCommander):
             # save_hook
         )
 
+    def pre_yolor(self):
+        self.model_name = self.sub_name = 'yolor'
+
+    def run_yolor(self):
+        model = self.create_model()
+        loaders = self.create_loaders('yolo', 512)
+
+        def eval_fn(inputs, labels):
+            for idx, ll in enumerate(labels):
+                ll[:, 0] = idx
+            inputs = inputs.to(self.device)
+            labels = labels.view(-1, 6).to(self.device) # batch x [batch_idx, cls_id, x, y, w, h]
+            outputs = model(inputs)
+            loss = yolor_loss(outputs, labels, model)
+            return loss[0], outputs
+
+        self.train_model(
+            model,
+            loaders,
+            eval_fn, {
+                # metrics_fn
+            },
+        )
+
     def pre_ssd(self):
         self.model_name = self.sub_name = 'ssd'
 
@@ -308,6 +334,17 @@ class MyTrainer(TorchCommander):
                 cc.append(c.to(self.device))
             predicted_locs, predicted_scores = model(inputs)
             loss = criterion(predicted_locs, predicted_scores, bb, cc)
+            if float(loss.item()) > 1000000:
+                vv = [predicted_locs, predicted_scores, bb, cc]
+                vvv = []
+                for v in vv:
+                    if torch.is_tensor(v):
+                        vvv.append(v.to('cpu'))
+                    else:
+                        vvv.append([a.to('cpu') for a in v])
+                torch.save([*vv, loss.item()], 'tmp/loss.pth')
+                print(loss.item())
+                exit(0)
             return loss, None
 
         self.train_model(

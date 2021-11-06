@@ -1,4 +1,5 @@
 import torch
+import math
 import yaml
 import torch.nn as nn
 
@@ -526,10 +527,12 @@ class JDELayer(nn.Module):
 class Yolor(nn.Module):
     # YOLOv3 object detection model
 
-    def __init__(self, cfg='cfg/yolor_scp.cfg', img_size=(512, 512), verbose=False):
+    def __init__(self, num_classes=7, cfg='cfg/yolor_scp.cfg', img_size=(512, 512), verbose=False):
         super().__init__()
         with open('cfg/yolor_hyp.yml', 'r') as yml:
-            self.hyp = yaml.load(yml)
+            self.hyp = yaml.load(yml, Loader=yaml.FullLoader)
+        self.gr = 1.0
+        self.nc = num_classes
         self.module_defs = parse_model_cfg(cfg)
         self.module_list, self.routs = create_modules(self.module_defs, img_size, cfg)
         self.yolo_layers = get_yolo_layers(self)
@@ -539,6 +542,18 @@ class Yolor(nn.Module):
         self.version = np.array([0, 2, 5], dtype=np.int32)  # (int32) version info: major, minor, revision
         self.seen = np.array([0], dtype=np.int64)  # (int64) number of images seen during training
         self.info(verbose) if not ONNX_EXPORT else None  # print model description
+
+    def predict(self, x, conf_thres, iou_thres, agnostic_nms):
+        yy = self(x)
+        preds = []
+        for y in yy:
+            preds.append(non_max_suppression(y, conf_thres, iou_thres, classes=self.nc, agnostic=agnostic_nms))
+        # for i, det in enumerate(pred):
+        #     for i, det in enumerate(pred):
+        #         det[:, :4] = scale_coords(x.shape[2:], det[:, :4], x.shape).round()
+        #         print(det)
+
+        return preds
 
     def forward(self, x, augment=False, verbose=False):
 
@@ -823,7 +838,6 @@ class FocalLoss(nn.Module):
 
 def yolor_loss(p, targets, model):  # predictions, targets, model
     device = targets.device
-    #print(device)
     lcls, lbox, lobj = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
     tcls, tbox, indices, anchors = build_targets(p, targets, model)  # targets
     h = model.hyp  # hyperparameters
@@ -897,7 +911,6 @@ def build_targets(p, targets, model):
     for i, jj in enumerate(model.module.yolo_layers if multi_gpu else model.yolo_layers):
         # get number of grid points and anchor vec for this yolo layer
         anchors = model.module.module_list[jj].anchor_vec if multi_gpu else model.module_list[jj].anchor_vec
-        print(p[i].shape)
         gain[2:] = torch.tensor(p[i].shape)[[3, 2, 3, 2]]  # xyxy gain
 
         # Match targets to anchors
