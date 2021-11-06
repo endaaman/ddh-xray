@@ -192,5 +192,5 @@ class Table(Commander):
         plt.show()
 
 
-
-Table().run()
+t = Table()
+t.run()
