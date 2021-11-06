@@ -123,7 +123,7 @@ def xyxy_to_xywh(bb, w, h):
 
 
 class ROIDataset(Dataset):
-    def __init__(self, target='effdet', is_training=True, normalized=True):
+    def __init__(self, target='effdet', is_training=True, normalized=True, with_label=True):
         adapter_table = {
             'effdet': self.effdet_adapter,
             'yolo': self.yolo_adapter,
@@ -133,6 +133,7 @@ class ROIDataset(Dataset):
             raise ValueError(f'Invalid target: {target}')
         self.target = target
         self.is_training = is_training
+        self.with_label = with_label
         self.normalized = normalized
 
         self.adapter = adapter_table[target]
@@ -152,14 +153,12 @@ class ROIDataset(Dataset):
         for image_path in t:
             file_name = os.path.basename(image_path)
             base_name = os.path.splitext(file_name)[0]
-            label_path = os.path.join(base_dir, 'label', f'{base_name}.txt')
-            bb_df = read_label(label_path)
-            # if self.is_training:
-            #     label_path = os.path.join(base_dir, 'label', f'{base_name}.txt')
-            #     bb_df = read_label(label_path)
-            # else:
-            #     label_path = None
-            #     bb_df = pd.DataFrame()
+            if self.with_label:
+                label_path = os.path.join(base_dir, 'label', f'{base_name}.txt')
+                bb_df = read_label(label_path)
+            else:
+                label_path = None
+                bb_df = pd.DataFrame()
             image = Image.open(image_path)
             items.append(XRBBItem(image, base_name, bb_df, image_path, label_path))
             t.set_description(f'loaded {image_path}')
@@ -270,8 +269,8 @@ def resplit():
     train_ds = ROIDataset(is_training=True)
     test_ds = ROIDataset(is_training=False)
 
-    train_ids = np.loadtxt('./train.tsv', delimiter='\t').astype(np.int64).tolist()
-    test_ids = np.loadtxt('./test.tsv', delimiter='\t').astype(np.int64).tolist()
+    train_ids = np.loadtxt('./data/train.tsv', delimiter='\t').astype(np.int64).tolist()
+    test_ids = np.loadtxt('./data/test.tsv', delimiter='\t').astype(np.int64).tolist()
 
     items = train_ds.items + test_ds.items
 

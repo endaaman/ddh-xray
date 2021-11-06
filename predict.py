@@ -255,7 +255,7 @@ class Predictor(TorchCommander):
         parser.add_argument('-d', '--dest', default='tmp/test')
 
     def run_gen_labels(self):
-        ds = ROIDataset(is_training=False)
+        ds = ROIDataset(is_training=False, with_label=False)
         imgs = [item.image for item in ds.items]
 
         image_dest = os.path.join(self.args.dest, 'image')
@@ -274,11 +274,11 @@ class Predictor(TorchCommander):
             for bbox in roi:
                 x0, y0, x1, y1 = bbox[:4] / self.predictor.get_image_size()
                 label = bbox[4] - 1
-                x = (x1 - x0) / 2
-                y = (y1 - y0) / 2
+                x = x0 + (x1 - x0) / 2
+                y = y0 + (y1 - y0) / 2
                 w = x1 - x0
                 h = y1 - y0
-                line = f'{label} {x:.6f} {y:.6f} {w:.6f} {y:.6f}'
+                line = f'{label} {x:.6f} {y:.6f} {w:.6f} {h:.6f}'
                 lines.append([label, line])
 
             lines = sorted(lines, key=lambda v:v[0])
