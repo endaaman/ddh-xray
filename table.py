@@ -98,7 +98,7 @@ class Table(Commander):
         parser.add_argument('--roc', action='store_true')
         parser.add_argument('--folds', type=int, default=5)
         parser.add_argument('-i', '--imputer')
-        parser.add_argument('-m', '--model', default='gbm', nargs='+', choices=['gbm', 'xgb', 'svm', 'nn'])
+        parser.add_argument('-m', '--model', default=['gbm'], nargs='+', choices=['gbm', 'xgb', 'svm', 'nn'])
         parser.add_argument('-k', '--kernel', default='rbf')
         parser.add_argument('-g', '--gather', default='median', choices=['mean', 'median', 'reg'])
         parser.add_argument('-b', '--mean-by-bench', action='store_true')

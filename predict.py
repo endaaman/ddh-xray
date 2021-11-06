@@ -17,6 +17,7 @@ from models import YOLOv3, Yolor
 from models.yolo_v3 import non_max_suppression, rescale_boxes
 from utils import pil_to_tensor
 
+from datasets import ROIDataset, label_to_str
 from endaaman import TorchCommander
 
 
@@ -73,6 +74,8 @@ class YOLOPredictor:
             else:
                 t = t.type(torch.long)
                 t[:, 4] = t[:, 6]
+                # t[:, :4] /= self.get_image_size()
+                # x0, y0, x1, y1, cls
                 outputs.append(t[:, :5])
         return outputs
 
@@ -143,11 +146,11 @@ class Predictor(TorchCommander):
     def pre_common(self):
         self.font = ImageFont.truetype('/usr/share/fonts/ubuntu/Ubuntu-R.ttf', size=16)
         self.weights = torch.load(self.args.weights, map_location=lambda storage, loc: storage)
+        self.predictor = self.create_predictor()
 
-    def detect_images(self, predictor, imgs):
-        sizes = [(i.width, i.height) for i in imgs]
-        image_size = predictor.get_image_size()
-        imgs = [i.resize((image_size, image_size)) for i in imgs]
+    def detect_rois(self, imgs):
+        image_size = self.predictor.get_image_size()
+        resized_imgs = [i.resize((image_size, image_size)) for i in imgs]
         transform_image = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize([0.4831]*3, [0.3257]*3),
@@ -156,36 +159,50 @@ class Predictor(TorchCommander):
         bs = self.args.batch_size
         outputs = []
         start = 0
-        t = tqdm(range(0, len(imgs), bs))
+        t = tqdm(range(0, len(resized_imgs), bs))
         for start in t:
-            batch = imgs[start:start + bs]
+            batch = resized_imgs[start:start + bs]
 
             tt = torch.stack([transform_image(i) for i in batch]).to(self.device)
             with torch.no_grad():
-                o = predictor(tt)
+                o = self.predictor(tt)
             outputs += o
-            t.set_description(f'{start} ~ {start + bs} / {len(imgs)}')
+            t.set_description(f'{start} ~ {start + bs} / {len(resized_imgs)}')
             t.refresh()
+        return outputs
 
-        results = []
-        for img, bboxes in zip(imgs, outputs):
+    def select_rois(self, rois):
+        best_rois = []
+        for i, bboxes in enumerate(rois):
             best_bboxes = []
             for i in LABEL_TO_STR.keys():
                 m = bboxes[bboxes[:, 4] == i]
                 if len(m) > 0:
                     best_bboxes.append(m[0])
                 else:
-                    print('missing {LABEL_TO_STR[i]}')
+                    print(f'img[{i}]: missing {LABEL_TO_STR[i]}')
+            best_rois.append(best_bboxes)
+        return best_rois
 
+    def draw_rois(self, imgs, rois):
+        sizes = [(i.width, i.height) for i in imgs]
+        results = []
+
+        for img, bboxes in zip(imgs, rois):
             draw = ImageDraw.Draw(img)
-            for i, result in enumerate(best_bboxes):
-                bbox = result[:4]
+            for i, (result, size) in enumerate(zip(bboxes, sizes)):
                 label = result[4].item()
+                bbox = result[:4].numpy() * np.array([size[0], size[1], size[0], size[1]]) / predictor.get_image_size()
+                bbox = np.rint(bbox).astype(np.int64)
                 draw.text((bbox[0], bbox[1]), LABEL_TO_STR[label], font=self.font, fill='yellow')
                 draw.rectangle(((bbox[0], bbox[1]), (bbox[2], bbox[3])), outline='yellow', width=1)
             results.append(img)
-        return [i.resize(size) for i, size in zip(results, sizes)]
+        return results
 
+    def detect_images(self, imgs):
+        rois = self.detect_rois(imgs)
+        rois = self.select_rois(rois)
+        return self.draw_rois(imgs, rois)
 
     def arg_dir(self, parser):
         parser.add_argument('-s', '--src-dir', type=str, required=True)
@@ -193,7 +210,6 @@ class Predictor(TorchCommander):
 
     def run_dir(self):
         os.makedirs(self.args.dest_dir, exist_ok=True)
-        predictor = self.create_predictor()
 
         imgs = []
         names = []
@@ -206,7 +222,7 @@ class Predictor(TorchCommander):
             print('empty')
             return
 
-        results = self.detect_images(predictor, imgs)
+        results = self.detect_images(imgs)
 
         for name, result in tqdm(zip(names, results)):
             p = os.path.join(self.args.dest_dir, name)
@@ -218,14 +234,12 @@ class Predictor(TorchCommander):
         parser.add_argument('-d', '--dest-dir', type=str, default='tmp')
 
     def run_single(self):
-        predictor = self.create_predictor()
-
         dest_dir = self.args.dest_dir
         os.makedirs(dest_dir, exist_ok=True)
 
         img_size = 512
         img = Image.open(self.args.src)
-        img = self.detect_images(predictor, [img])[0]
+        img = self.detect_images([img])[0]
 
         # model_id = state['args'].network + '_e' + str(state['epoch'])
         # dest_dir = os.path.join(self.args.dest, model_id)
@@ -237,5 +251,44 @@ class Predictor(TorchCommander):
         if self.args.open:
             os.system(f'xdg-open {dest_path}')
 
+    def arg_gen_labels(self, parser):
+        parser.add_argument('-d', '--dest', default='tmp/test')
 
-Predictor().run()
+    def run_gen_labels(self):
+        ds = ROIDataset(is_training=False)
+        imgs = [item.image for item in ds.items]
+
+        image_dest = os.path.join(self.args.dest, 'image')
+        label_dest = os.path.join(self.args.dest, 'label')
+        os.makedirs(image_dest, exist_ok=True)
+        os.makedirs(label_dest, exist_ok=True)
+
+        rois = self.detect_rois(imgs)
+        rois = self.select_rois(rois)
+
+        # convert to yolo string
+        for i, (roi, item) in tqdm(enumerate(zip(rois, ds.items))):
+            item.image.save(os.path.join(image_dest, f'{item.name}.png'))
+
+            lines = []
+            for bbox in roi:
+                x0, y0, x1, y1 = bbox[:4] / self.predictor.get_image_size()
+                label = bbox[4] - 1
+                x = (x1 - x0) / 2
+                y = (y1 - y0) / 2
+                w = x1 - x0
+                h = y1 - y0
+                line = f'{label} {x:.6f} {y:.6f} {w:.6f} {y:.6f}'
+                lines.append([label, line])
+
+            lines = sorted(lines, key=lambda v:v[0])
+            with open(os.path.join(label_dest, f'{item.name}.txt'), 'w', newline='\n') as f:
+                f.write('\n'.join([l[1] for l in lines]))
+
+        self.ds = ds
+        self.rois =rois
+        # self.outputs = outputs
+
+
+p = Predictor()
+p.run()

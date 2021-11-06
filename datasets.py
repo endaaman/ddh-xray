@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 import glob
 import warnings
 import math
@@ -50,8 +51,8 @@ cols_feature = cols_cat + cols_val + list(cols_extend.keys())
 IMAGE_SIZE = 624
 
 def read_label(path):
-    f = open(path, 'r')
-    lines = f.readlines()
+    with open(path, 'r') as f:
+        lines = f.readlines()
 
     cols = ['x0', 'y0', 'x1', 'y1', 'id']
     data = []
@@ -68,6 +69,20 @@ def read_label(path):
             class_id,
         ])
     return pd.DataFrame(columns=cols, data=data)
+
+def label_to_str(label):
+    lines = []
+    for bbox in label:
+        x0, y0, x1, y1 = bbox[:4] / IMAGE_SIZE
+        c = bbox[4] - 1
+        x = (x1 - x0) / 2
+        y = (y1 - y0) / 2
+        w = x1 - x0
+        h = y1 - y0
+        line = f'{c} {x:.6f} {y:.6f} {w:.6f} {y:.6f}'
+        lines.append([c, line])
+    lines = sorted(lines, key=lambda v:v[0])
+    return '\n'.join([l[1] for l in lines])
 
 
 XRBBItem = namedtuple('XRItem', ['image', 'name', 'bb', 'image_path', 'label_path'])
@@ -108,7 +123,7 @@ def xyxy_to_xywh(bb, w, h):
 
 
 class ROIDataset(Dataset):
-    def __init__(self, target, is_training=True, normalized=True):
+    def __init__(self, target='effdet', is_training=True, normalized=True):
         adapter_table = {
             'effdet': self.effdet_adapter,
             'yolo': self.yolo_adapter,
@@ -137,12 +152,14 @@ class ROIDataset(Dataset):
         for image_path in t:
             file_name = os.path.basename(image_path)
             base_name = os.path.splitext(file_name)[0]
-            if self.is_training:
-                label_path = os.path.join(base_dir, 'label', f'{base_name}.txt')
-                bb_df = read_label(label_path)
-            else:
-                label_path = None
-                bb_df = pd.DataFrame()
+            label_path = os.path.join(base_dir, 'label', f'{base_name}.txt')
+            bb_df = read_label(label_path)
+            # if self.is_training:
+            #     label_path = os.path.join(base_dir, 'label', f'{base_name}.txt')
+            #     bb_df = read_label(label_path)
+            # else:
+            #     label_path = None
+            #     bb_df = pd.DataFrame()
             image = Image.open(image_path)
             items.append(XRBBItem(image, base_name, bb_df, image_path, label_path))
             t.set_description(f'loaded {image_path}')
@@ -249,62 +266,42 @@ class ROICroppedDataset(Dataset):
         return self.transform(x, y)
 
 
-def test_flip():
-    a = A.ReplayCompose([
-        A.HorizontalFlip(p=0.5)
-    ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']))
+def resplit():
+    train_ds = ROIDataset(is_training=True)
+    test_ds = ROIDataset(is_training=False)
 
-    img = np.ones([30, 30, 3])
-    label = np.array([
-        [5, 5, 6, 6, 1]
-    ])
+    train_ids = np.loadtxt('./train.tsv', delimiter='\t').astype(np.int64).tolist()
+    test_ids = np.loadtxt('./test.tsv', delimiter='\t').astype(np.int64).tolist()
 
-    r = a(
-        image=img,
-        bboxes=label[:, :4],
-        labels=label[:, 4],
-    )
-    for t in r['replay']['transforms']:
-        print(t['applied'])
+    items = train_ds.items + test_ds.items
 
-    print(r['bboxes'])
-    print(r['labels'])
+
+    dest_dir = 'data/roi_new'
+    for a in ['train', 'test']:
+        for b in ['image', 'label']:
+            os.makedirs(os.path.join(dest_dir, a, b), exist_ok=True)
+
+    for item in tqdm(items):
+        i = int(item.name)
+        if i in train_ids:
+            train_ids.pop(train_ids.index(i))
+            target = 'train'
+        elif i in test_ids:
+            test_ids.pop(test_ids.index(i))
+            target = 'test'
+        else:
+            print(f'missing: {i}')
+
+        label_name = os.path.basename(item.label_path)
+        image_name = os.path.basename(item.image_path)
+        shutil.copyfile(item.image_path, os.path.join(dest_dir, target, 'image', image_name))
+        shutil.copyfile(item.label_path, os.path.join(dest_dir, target, 'label', label_name))
+
+    print(train_ids)
+    print(test_ids)
+
+
+
 
 if __name__ == '__main__':
-    # test_flip()
-    # exit(0)
-
-    augs = [
-        A.RandomResizedCrop(width=512, height=512, scale=[0.5, 0.5]),
-    ]
-
-    ds = ROIDataset('yolo', normalized=False)
-    ds.apply_augs(augs)
-
-    for (X, Y) in ds:
-        print('ok')
-        # t = torch.from_numpy(img).permute(2, 0, 1)
-        img = tensor_to_pil(X)
-        img.save('tmp/org.png')
-        bb = Y[:, 2:].numpy() * 512
-        print(bb)
-        x, y, w, h = bb.T
-        print(x)
-        print(y)
-        print(w)
-        print(h)
-        bb = np.array([
-            x - w/2,
-            y - h/2,
-            x + w/2,
-            y + h/2,
-        ]).T
-        print(bb)
-        # t = torch.from_numpy((X * 255).astype(np.uint8))
-        # print(t.shape)
-        t = draw_bounding_boxes(image=X, boxes=torch.from_numpy(bb))
-        img = tensor_to_pil(t)
-        img.save('tmp/aug.png')
-
-        print('ok')
-        break
+    resplit()
