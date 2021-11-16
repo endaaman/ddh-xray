@@ -181,14 +181,22 @@ class Table(Commander):
         bench.restore(checkpoint['model_data'])
         self.draw_roc(bench)
 
+    def arg_visualize(self, parser):
+        parser.add_argument('-m', '--mode', default='train', choices=['train', 'test'])
+
     def run_visualize(self):
+        df = self.df_train if self.args.mode == 'train' else self.df_test
         fig, axes = plt.subplots(nrows=2, ncols=4, figsize=(20, 10))
-        fig.suptitle('violin')
+        fig.suptitle(f'Data distribution ({self.args.mode} dataset)')
         for i, col in enumerate(['left_alpha', 'right_alpha', 'left_oe', 'right_oe', 'left_a', 'right_a', 'left_b', 'right_b']):
             ax = axes[i//4][i%4]
             ax.set_title(col)
             # sns.violinplot(x='sex', y=col, hue='treatment', data=self.df_train, split=True, ax=ax)
-            sns.violinplot(y=col, x='treatment', hue='sex', data=self.df_train, split=True, ax=ax)
+            sns.violinplot(y=col, x='treatment', hue='sex', data=df, split=True, ax=ax)
+
+        p = f'tmp/violin_{self.args.mode}.png'
+        plt.savefig(p)
+        print(f'wrote {p}')
         plt.show()
 
 

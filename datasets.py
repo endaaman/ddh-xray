@@ -34,7 +34,7 @@ cols_measure = ['left_alpha', 'right_alpha', 'left_oe', 'right_oe', 'left_a', 'r
 # cols_val = ['left_alpha', 'right_alpha', 'left_oe', 'right_oe', 'left_a', 'right_a', 'left_b', 'right_b', ]
 
 cols_cat = []
-cols_val = ['sex', 'breech_presentation'] + cols_measure
+cols_val = ['sex', 'breech_presentation', 'family_history'] + cols_measure
 # cols_val = ['sex', 'breech_presentation'] + cols_measure
 
 do_abs = lambda x: np.power(x, 2)
