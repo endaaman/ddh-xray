@@ -181,10 +181,10 @@ class Table(Commander):
         bench.restore(checkpoint['model_data'])
         self.draw_roc(bench)
 
-    def arg_visualize(self, parser):
+    def arg_violin(self, parser):
         parser.add_argument('-m', '--mode', default='train', choices=['train', 'test'])
 
-    def run_visualize(self):
+    def run_violin(self):
         df = self.df_train if self.args.mode == 'train' else self.df_test
         fig, axes = plt.subplots(nrows=2, ncols=4, figsize=(20, 10))
         fig.suptitle(f'Data distribution ({self.args.mode} dataset)')
@@ -198,6 +198,33 @@ class Table(Commander):
         plt.savefig(p)
         print(f'wrote {p}')
         plt.show()
+
+    def run_mean_std(self):
+        m = []
+
+        bool_keys = ['sex', 'breech_presentation', 'treatment']
+        for col in bool_keys:
+            texts = []
+            for df in [self.df_test, self.df_train]:
+                t = 100 * df[col].sum() / len(df[col])
+                f = 100 - t
+                texts.append(f'{t:.1f}% : {f:.1f}%')
+            print(f'{col}: ' + ' '.join(texts))
+            m.append([col] + texts)
+
+        float_keys = ['left_alpha', 'right_alpha', 'left_oe', 'right_oe', 'left_a', 'right_a', 'left_b', 'right_b']
+        for col in float_keys:
+            texts = []
+            for df in [self.df_test, self.df_train]:
+                mean = df[col].mean()
+                std = df[col].std()
+                texts.append(f'{mean:.2f}±{std:.2f}')
+            print(f'{col:<8}: ' + ' '.join(texts))
+            m.append([col] + texts)
+        self.m = m
+        print(m)
+        o = pd.DataFrame(m)
+        o.to_excel('out/mean_std.xlsx', index=False)
 
 
 t = Table()
