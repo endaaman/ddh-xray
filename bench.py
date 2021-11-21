@@ -12,8 +12,6 @@ import torch
 from torch import nn, optim
 from torch.utils.data import TensorDataset, DataLoader
 
-from datasets import cols_cat, col_target, cols_feature, cols_extend
-
 
 class Bench:
     def __init__(self, num_folds, seed):
@@ -28,28 +26,21 @@ class Bench:
     def preprocess(self, x, y=None):
         return x, y
 
-    def train(self, df_train):
-        # if not self.use_fold:
-        #     x_train = df_train[cols_feature]
-        #     y_train = df_train[col_target]
-        #     x_valid = pd.DataFrame(np.array([[]]))
-        #     y_valid = pd.DataFrame(np.array([]))
-        #     model = self._train(x_train, y_train, x_valid, y_valid)
-        #     self.models = [model]
-        #     return
-
+    def train(self, df_train, target_col):
         folds = StratifiedKFold(n_splits=self.num_folds, shuffle=True, random_state=self.seed)
         # 各foldターゲットのラベルの分布がそろうようにする = stratified K fold
-        folds = folds.split(np.arange(len(df_train)), y=df_train[col_target])
+        folds = folds.split(np.arange(len(df_train)), y=df_train[target_col])
         folds = list(folds)
         models = []
         for fold in range(self.num_folds):
             print(f'fold {fold+1}/{self.num_folds}')
+            df_x = df_train.drop([target_col], axis=1)
+            df_y =  df_train[target_col]
             vv = [
-                df_train.iloc[folds[fold][0]][cols_feature], # x_train
-                df_train.iloc[folds[fold][0]][col_target],   # y_train
-                df_train.iloc[folds[fold][1]][cols_feature], # x_valid
-                df_train.iloc[folds[fold][1]][col_target],   # y_valid
+                df_x.iloc[folds[fold][0]], # x_train
+                df_y.iloc[folds[fold][0]], # y_train
+                df_x.iloc[folds[fold][1]], # x_valid
+                df_y.iloc[folds[fold][1]], # y_valid
             ]
             vv = [v.copy() for v in vv]
             vv[0], vv[1] = self.preprocess(*vv[:2])
@@ -90,8 +81,8 @@ class LightGBMBench(Bench):
         else:
             self.imputer = None
 
-    def train(self, df_train):
-        super().train(df_train)
+    def train(self, df_train, target_col):
+        super().train(df_train, target_col)
         # preds_valid = np.zeros([len(self.df_train)], np.float32)
         # preds_test = np.zeros([5, len(self.df_test)], np.float32)
         # df_feature_importance = pd.DataFrame()
@@ -112,7 +103,7 @@ class LightGBMBench(Bench):
             x = self.impute(x)
         return x, y
 
-    def _train(self, x_train, y_train, x_valid, y_valid):
+    def _train(self, x_train, y_train, x_valid, y_valid, categorical_col=[]):
         gbm_params = {
             'objective': 'binary', # 目的->2値分類
             'num_threads': -1,
@@ -124,10 +115,10 @@ class LightGBMBench(Bench):
             'verbosity': -1,
         }
 
-        train_data = self.lgb.Dataset(x_train, label=y_train, categorical_feature=cols_cat)
+        train_data = self.lgb.Dataset(x_train, label=y_train, categorical_feature=categorical_col)
         valid_sets = [train_data]
         if np.any(x_valid):
-            valid_data = self.lgb.Dataset(x_valid, label=y_valid, categorical_feature=cols_cat)
+            valid_data = self.lgb.Dataset(x_valid, label=y_valid, categorical_feature=categorical_col)
             valid_sets += [valid_data]
 
         model = self.lgb.train(
@@ -137,18 +128,9 @@ class LightGBMBench(Bench):
             valid_sets=valid_sets,
             verbose_eval=200,
             early_stopping_rounds=150,
-            categorical_feature=cols_cat,
+            categorical_feature=categorical_col,
         )
 
-        print('TRAIN2')
-        # tmp = pd.DataFrame()
-        # tmp['feature'] = cols_feature
-        # tmp['importance'] = model.feature_importance()
-        # tmp['fold'] = fold + 1
-        # df_feature_importance = pd.concat([df_feature_importance, tmp], axis=0)
-        #
-        # preds_valid[folds[fold][1]] = model.predict(x_valid, num_iteration=model.best_iteration)
-        # preds_test[fold] = model.predict(x_test, num_iteration=model.best_iteration)
         return model
 
     def _predict(self, model, x):
@@ -239,11 +221,14 @@ class SVMBench(Bench):
         best_parameters = {}
         best_model = None
         for gamma in tqdm(param_list):
-            for C in tqdm(param_list, leave=False):
+            t = tqdm(param_list, leave=False)
+            for C in t:
                 # model = SVC(kernel=self.svm_kernel, gamma=gamma, C=C, random_state=None)
                 model = SVR(kernel=self.svm_kernel, gamma=gamma, C=C)
                 model.fit(x_train, y_train)
                 score = model.score(x_valid, y_valid)
+                t.set_description(f'score: {score:.3f} best: {best_score:.3f}')
+                t.refresh()
                 if score > best_score:
                     best_score = score
                     best_parameters = {'gamma' : gamma, 'C' : C}

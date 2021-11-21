@@ -6,7 +6,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 import seaborn as sns
 import torch
-import torch.nn as nn
+from torch import nn
 import pandas as pd
 from tqdm import tqdm
 
@@ -53,6 +53,7 @@ class Table(Commander):
         self.meta_model = LinearRegression()
 
         self.df_all = pd.concat([df_train, df_test])
+        self.df_all = self.df_all[cols_feature + [col_target]]
         # self.df_all.loc[:, cols_cat]= self.df_all[cols_cat].astype('category')
 
         for col, fn in cols_extend.items():
@@ -113,7 +114,7 @@ class Table(Commander):
         benchs = self.create_benchs_by_args(self.args)
 
         for b in benchs:
-            b.train(self.df_train)
+            b.train(self.df_train, col_target)
 
         # p = f'out/model{self.get_suffix()}.txt'
         # model.save_model(p)
