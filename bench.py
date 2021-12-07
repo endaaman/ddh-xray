@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 from sklearn.svm import SVR
 from sklearn.model_selection import StratifiedKFold, KFold
-from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer, KNNImputer
 import lightgbm as org_lgb
 import optuna.integration.lightgbm as opt_lgb
@@ -17,11 +16,6 @@ class Bench:
     def __init__(self, num_folds, seed):
         self.num_folds = num_folds
         self.seed = seed
-        self.scaler = StandardScaler()
-
-    def impute(self, x):
-        # return pd.DataFrame(self.imp.fit(x).transform(x), columns=x.columns)
-        return self.imputer.fit(x).transform(x)
 
     def preprocess(self, x, y=None):
         return x, y
@@ -100,7 +94,7 @@ class LightGBMBench(Bench):
         # y[q] *= epsilon
         # y[q] += (1-epsilon)/2
         if self.imputer:
-            x = self.impute(x)
+            x = self.imputer.fit(x)
         return x, y
 
     def _train(self, x_train, y_train, x_valid, y_valid, categorical_col=[]):
@@ -164,7 +158,7 @@ class XGBBench(Bench):
         # y[q] *= epsilon
         # y[q] += (1-epsilon)/2
         if self.imputer:
-            x = self.impute(x)
+            x = self.imputer.fit(x)
         return x, y
 
     def _train(self, x_train, y_train, x_valid, y_valid):
@@ -209,10 +203,10 @@ class SVMBench(Bench):
         self.svm_kernel = svm_kernel
 
     def preprocess(self, x, y=None):
-        # x = pd.DataFrame(self.scaler.fit(x).transform(x))
-        if self.imputer:
-            x = self.impute(x)
-        # x[x.isna()] = -1000
+        x[x.isna()] = -1
+        # if self.imputer:
+        #     self.imputer.fit(x)
+        #     x = self.imputer.transform(x)
         return x, y
 
     def _train(self, x_train, y_train, x_valid, y_valid):
@@ -242,7 +236,6 @@ class SVMBench(Bench):
         return best_model
 
     def _predict(self, model, x):
-        x = self.impute(x)
         y = model.predict(x)
         return y
 
@@ -317,7 +310,6 @@ class NNBench(Bench):
             epsilon = 0.6
             y[q] *= epsilon
             y[q] += (1-epsilon)/2
-            # x = pd.DataFrame(self.scaler.fit(x).transform(x))
         x[x.isna()] = -1000
         return x, y
 

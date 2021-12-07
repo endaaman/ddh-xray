@@ -41,19 +41,27 @@ class Table(Commander):
         torch.cuda.manual_seed(self.args.seed)
 
         df = pd.read_excel('data/table.xlsx', index_col=0)
+        df_measure_train = pd.read_excel('data/measurement_train.xlsx', index_col=0)
+        df_measure_test = pd.read_excel('data/measurement_test.xlsx', index_col=0)
+
+        df.loc[df.index.isin(df_measure_train.index), 'test'] = 0
+        df.loc[df.index.isin(df_measure_test.index), 'test'] = 1
         df_train = df[df['test'] == 0]
         df_test = df[df['test'] == 1]
 
-        df_measure_train = pd.read_excel('data/measurement_train.xlsx', index_col=0)
-        df_measure_test = pd.read_excel('data/measurement_test.xlsx', index_col=0)
+        # df_train = df[df.index.isin(df_measure_train.index)]
+        # df_train.loc['test'] = 0
+        # df_test = df[df.index.isin(df_measure_test.index)]
+        # df_test['test'] = 1
+
         df_train = pd.concat([df_train, df_measure_train], axis=1)
         df_test = pd.concat([df_test, df_measure_test], axis=1)
 
         # self.meta_model = LogisticRegression()
         self.meta_model = LinearRegression()
 
-        self.df_all = pd.concat([df_train, df_test])
-        self.df_all = self.df_all[cols_feature + [col_target]]
+        self.df_org = pd.concat([df_train, df_test])
+        self.df_all = self.df_org[cols_feature + [col_target]]
         # self.df_all.loc[:, cols_cat]= self.df_all[cols_cat].astype('category')
 
         for col, fn in cols_extend.items():
@@ -62,8 +70,8 @@ class Table(Commander):
         if self.args.test_ratio:
             self.df_train, self.df_test = train_test_split(self.df_all, test_size=self.args.test_ratio, random_state=self.args.seed)
         else:
-            self.df_train = self.df_all[self.df_all['test'] == 0]
-            self.df_test = self.df_all[self.df_all['test'] == 1]
+            self.df_train = self.df_all[self.df_org['test'] == 0]
+            self.df_test = self.df_all[self.df_org['test'] == 1]
 
     def run_demo(self):
         print(len(self.df_test))
@@ -101,7 +109,7 @@ class Table(Commander):
         parser.add_argument('-i', '--imputer')
         parser.add_argument('-m', '--model', default=['gbm'], nargs='+', choices=['gbm', 'xgb', 'svm', 'nn'])
         parser.add_argument('-k', '--kernel', default='rbf')
-        parser.add_argument('-g', '--gather', default='median', choices=['mean', 'median', 'reg'])
+        parser.add_argument('-g', '--gather', default='median', choices=['median', 'mean', 'reg'])
         parser.add_argument('-b', '--mean-by-bench', action='store_true')
 
     def predict_benchs(self, benchs, x):
@@ -145,21 +153,38 @@ class Table(Commander):
         preds_train = self.predict_benchs(benchs, x_train)
         preds_test = self.predict_benchs(benchs, x_test)
 
-        if self.args.gather == 'mean':
-            pred_train = np.mean(preds_train, axis=1)
-            pred_test = np.mean(preds_test, axis=1)
-        elif self.args.gather == 'median':
+        if self.args.gather == 'median':
             pred_train = np.median(preds_train, axis=1)
             pred_test = np.median(preds_test, axis=1)
+        elif self.args.gather == 'mean':
+            pred_train = np.mean(preds_train, axis=1)
+            pred_test = np.mean(preds_test, axis=1)
         elif self.args.gather == 'reg':
             pred_train = self.meta_model.predict(preds_train)
             pred_test = self.meta_model.predict(preds_test)
         else:
             raise RuntimeError(f'Invalid gather rule: {self.args.gather}')
 
+        result = {}
         for (t, y, pred) in (('train', y_train, pred_train), ('test', y_test, pred_test)):
             fpr, tpr, thresholds = metrics.roc_curve(y, pred)
+            sums = tpr + fpr
+            if t == 'train':
+                best_index = np.argmax(sums)
+                threshold = thresholds[best_index]
+                print(f'best: {threshold}')
+            else:
+                pass
+                # print(f'test tpr: {tpr[best_index]}')
+                # print(f'test fpr: {fpr[best_index]}')
             auc = metrics.auc(fpr, tpr)
+            result[t] = {
+                'gt': y.values,
+                'pred': pred,
+                'thresholds': thresholds,
+                'tpr': tpr,
+                'fpr': fpr,
+            }
             plt.plot(fpr, tpr, label=f'{t} auc = {auc:.2f}')
 
         plt.legend()
@@ -167,10 +192,12 @@ class Table(Commander):
         plt.xlabel('False Positive Rate')
         plt.ylabel('True Positive Rate')
         plt.grid(True)
-        p = f'out/roc{self.get_suffix()}.png'
-        plt.savefig(p)
+        fig_path = f'out/roc{self.get_suffix()}.png'
+        plt.savefig(fig_path)
         plt.show()
-        print(f'wrote {p}')
+        result_path = f'out/result{self.get_suffix()}.pt'
+        torch.save(result, result_path)
+        print(f'wrote {fig_path} and {result_path}')
 
     def arg_roc(self, parser):
         parser.add_argument('-c', '--checkpoint')
@@ -192,8 +219,8 @@ class Table(Commander):
         for i, col in enumerate(['left_alpha', 'right_alpha', 'left_oe', 'right_oe', 'left_a', 'right_a', 'left_b', 'right_b']):
             ax = axes[i//4][i%4]
             ax.set_title(col)
-            # sns.violinplot(x='sex', y=col, hue='treatment', data=self.df_train, split=True, ax=ax)
-            sns.violinplot(y=col, x='treatment', hue='sex', data=df, split=True, ax=ax)
+            # sns.violinplot(x='female', y=col, hue='treatment', data=self.df_train, split=True, ax=ax)
+            sns.violinplot(y=col, x='treatment', hue='female', data=df, split=True, ax=ax)
 
         p = f'tmp/violin_{self.args.mode}.png'
         plt.savefig(p)
@@ -203,7 +230,7 @@ class Table(Commander):
     def run_mean_std(self):
         m = []
 
-        bool_keys = ['sex', 'breech_presentation', 'treatment']
+        bool_keys = ['female', 'breech_presentation', 'treatment']
         for col in bool_keys:
             texts = []
             for df in [self.df_test, self.df_train]:

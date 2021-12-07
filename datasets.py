@@ -29,13 +29,13 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 col_target = 'treatment'
 cols_measure = ['left_alpha', 'right_alpha', 'left_oe', 'right_oe', 'left_a', 'right_a', 'left_b', 'right_b', ]
 
-# cols_cat = ['sex', 'family_history', 'breech_presentation', 'skin_laterality', 'limb_limitation']
-# cols_cat = ['sex', 'family_history', 'skin_laterality', 'limb_limitation']
+# cols_cat = ['female', 'family_history', 'breech_presentation', 'skin_laterality', 'limb_limitation']
+# cols_cat = ['female', 'family_history', 'skin_laterality', 'limb_limitation']
 # cols_val = ['left_alpha', 'right_alpha', 'left_oe', 'right_oe', 'left_a', 'right_a', 'left_b', 'right_b', ]
 
 cols_cat = []
-cols_val = ['sex', 'breech_presentation', 'family_history'] + cols_measure
-# cols_val = ['sex', 'breech_presentation'] + cols_measure
+cols_val = ['female', 'breech_presentation'] + cols_measure
+# cols_val = ['female', 'breech_presentation'] + cols_measure
 
 do_abs = lambda x: np.power(x, 2)
 # do_abs = lambda x: x
