@@ -40,14 +40,14 @@ class Table(Commander):
         torch.manual_seed(self.args.seed)
         torch.cuda.manual_seed(self.args.seed)
 
-        df = pd.read_excel('data/table.xlsx', index_col=0)
+        df_table = pd.read_excel('data/table.xlsx', index_col=0)
         df_measure_train = pd.read_excel('data/measurement_train.xlsx', index_col=0)
         df_measure_test = pd.read_excel('data/measurement_test.xlsx', index_col=0)
 
-        df.loc[df.index.isin(df_measure_train.index), 'test'] = 0
-        df.loc[df.index.isin(df_measure_test.index), 'test'] = 1
-        df_train = df[df['test'] == 0]
-        df_test = df[df['test'] == 1]
+        df_table.loc[df_table.index.isin(df_measure_train.index), 'test'] = 0
+        df_table.loc[df_table.index.isin(df_measure_test.index), 'test'] = 1
+        df_train = df_table[df_table['test'] == 0]
+        df_test = df_table[df_table['test'] == 1]
 
         # df_train = df[df.index.isin(df_measure_train.index)]
         # df_train.loc['test'] = 0
@@ -72,6 +72,11 @@ class Table(Commander):
         else:
             self.df_train = self.df_all[self.df_org['test'] == 0]
             self.df_test = self.df_all[self.df_org['test'] == 1]
+
+        df_table_ind = pd.read_excel('data/table_independent.xlsx', index_col=0)
+        df_measure_ind = pd.read_excel('data/measurement_independent.xlsx', index_col=0)
+        df_ind = pd.concat([df_table_ind, df_measure_ind], axis=1)
+        self.df_ind = df_ind[cols_feature + [col_target]]
 
     def run_demo(self):
         print(len(self.df_test))
@@ -145,34 +150,43 @@ class Table(Commander):
             self.draw_roc(benchs)
 
     def draw_roc(self, benchs):
-        x_train = self.df_train[cols_feature]
-        y_train = self.df_train[col_target]
-        x_test = self.df_test[cols_feature]
-        y_test = self.df_test[col_target]
+        data = {
+            'train': {
+                'x': self.df_train[cols_feature],
+                'y': self.df_train[col_target],
+            },
+            'test': {
+                'x': self.df_test[cols_feature],
+                'y': self.df_test[col_target],
+            },
+            'ind': {
+                'x': self.df_ind[cols_feature],
+                'y': self.df_ind[col_target],
+            }
+        }
 
-        preds_train = self.predict_benchs(benchs, x_train)
-        preds_test = self.predict_benchs(benchs, x_test)
-
-        if self.args.gather == 'median':
-            pred_train = np.median(preds_train, axis=1)
-            pred_test = np.median(preds_test, axis=1)
-        elif self.args.gather == 'mean':
-            pred_train = np.mean(preds_train, axis=1)
-            pred_test = np.mean(preds_test, axis=1)
-        elif self.args.gather == 'reg':
-            pred_train = self.meta_model.predict(preds_train)
-            pred_test = self.meta_model.predict(preds_test)
-        else:
-            raise RuntimeError(f'Invalid gather rule: {self.args.gather}')
+        for (t, v) in data.items():
+            preds = self.predict_benchs(benchs, v['x'])
+            if self.args.gather == 'median':
+                pred = np.median(preds, axis=1)
+            elif self.args.gather == 'mean':
+                pred = np.mean(preds, axis=1)
+            elif self.args.gather == 'reg':
+                pred = self.meta_model.predict(preds)
+            else:
+                raise RuntimeError(f'Invalid gather rule: {self.args.gather}')
+            v['pred'] = pred
 
         result = {}
-        for (t, y, pred) in (('train', y_train, pred_train), ('test', y_test, pred_test)):
+        for t in ['train', 'test']:
+            y = data[t]['y']
+            pred = data[t]['pred']
             fpr, tpr, thresholds = metrics.roc_curve(y, pred)
-            sums = tpr + fpr
+            sums = tpr + 1 - fpr
             if t == 'train':
+                print(sums)
                 best_index = np.argmax(sums)
                 threshold = thresholds[best_index]
-                print(f'best: {threshold}')
             else:
                 pass
                 # print(f'test tpr: {tpr[best_index]}')
@@ -186,6 +200,10 @@ class Table(Commander):
                 'fpr': fpr,
             }
             plt.plot(fpr, tpr, label=f'{t} auc = {auc:.2f}')
+        print(f'best threshold: {threshold}')
+
+        self.threshold = threshold
+        self.data = data
 
         plt.legend()
         plt.title('ROC curve')
