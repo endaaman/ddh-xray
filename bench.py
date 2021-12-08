@@ -12,6 +12,8 @@ from torch import nn, optim
 from torch.utils.data import TensorDataset, DataLoader
 
 
+from datasets import cols_feature
+
 class Bench:
     def __init__(self, num_folds, seed):
         self.num_folds = num_folds
@@ -22,7 +24,6 @@ class Bench:
 
     def train(self, df_train, target_col):
         folds = StratifiedKFold(n_splits=self.num_folds, shuffle=True, random_state=self.seed)
-        # 各foldターゲットのラベルの分布がそろうようにする = stratified K fold
         folds = folds.split(np.arange(len(df_train)), y=df_train[target_col])
         folds = list(folds)
         models = []
@@ -39,11 +40,11 @@ class Bench:
             vv = [v.copy() for v in vv]
             vv[0], vv[1] = self.preprocess(*vv[:2])
             vv[2], vv[3] = self.preprocess(*vv[2:])
-            model = self._train(*vv)
+            model = self._train(*vv, fold)
             models.append(model)
         self.models = models
 
-    def _train(self, x_train, y_train, x_valid, y_valid):
+    def _train(self, x_train, y_train, x_valid, y_valid, fold):
         pass
 
     def predict(self, x):
@@ -71,35 +72,28 @@ class LightGBMBench(Bench):
             self.imputer = {
                 'simple': SimpleImputer(missing_values=np.nan, strategy='median'),
                 'knn': KNNImputer(n_neighbors=5),
+                'none': None,
             }[imputer]
         else:
             self.imputer = None
-
-    def train(self, df_train, target_col):
-        super().train(df_train, target_col)
-        # preds_valid = np.zeros([len(self.df_train)], np.float32)
-        # preds_test = np.zeros([5, len(self.df_test)], np.float32)
-        # df_feature_importance = pd.DataFrame()
-        # score = metrics.roc_auc_score(self.df_train[col_target], preds_valid)
-        # print(f'CV AUC: {score:.6f}')
-        # df_tmp = df_feature_importance.groupby('feature').agg('mean').reset_index()
-        # df_tmp = df_tmp.sort_values('importance', ascending=False)
-        # print(df_tmp[['feature', 'importance']])
-        # # df_tmp.to_csv('out/importance.csv')
+        self.df_feature_importance = pd.DataFrame()
 
     def preprocess(self, x, y=None):
         # label smoothing
-        # q = x.isnull().any(axis=1)
-        # epsilon = 0.6
-        # y[q] *= epsilon
-        # y[q] += (1-epsilon)/2
-        if self.imputer:
-            x = self.imputer.fit(x)
         return x, y
 
-    def _train(self, x_train, y_train, x_valid, y_valid, categorical_col=[]):
+    def train(self, df_train, target_col):
+        r = super().train(df_train, target_col)
+
+        df_tmp = self.df_feature_importance.groupby('feature').agg("mean").reset_index()
+        df_tmp = df_tmp.sort_values('importance', ascending=False)
+        print(df_tmp[['feature', 'importance']])
+
+        return r
+
+    def _train(self, x_train, y_train, x_valid, y_valid, fold):
         gbm_params = {
-            'objective': 'binary', # 目的->2値分類
+            'objective': 'binary',
             'num_threads': -1,
             'max_depth': 3,
             'bagging_seed': self.seed,
@@ -109,10 +103,10 @@ class LightGBMBench(Bench):
             'verbosity': -1,
         }
 
-        train_data = self.lgb.Dataset(x_train, label=y_train, categorical_feature=categorical_col)
+        train_data = self.lgb.Dataset(x_train, label=y_train, categorical_feature=[])
         valid_sets = [train_data]
         if np.any(x_valid):
-            valid_data = self.lgb.Dataset(x_valid, label=y_valid, categorical_feature=categorical_col)
+            valid_data = self.lgb.Dataset(x_valid, label=y_valid, categorical_feature=[])
             valid_sets += [valid_data]
 
         model = self.lgb.train(
@@ -122,8 +116,14 @@ class LightGBMBench(Bench):
             valid_sets=valid_sets,
             verbose_eval=200,
             early_stopping_rounds=150,
-            categorical_feature=categorical_col,
+            categorical_feature=[],
         )
+
+        tmp = pd.DataFrame()
+        tmp['feature'] = cols_feature
+        tmp['importance'] = model.feature_importance()
+        tmp['fold'] = fold + 1
+        self.df_feature_importance = pd.concat([self.df_feature_importance, tmp], axis=0)
 
         return model
 
@@ -141,27 +141,11 @@ class LightGBMBench(Bench):
 
 
 class XGBBench(Bench):
-    def __init__(self, imputer=None, use_optuna=False, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        if imputer:
-            self.imputer = {
-                'simple': SimpleImputer(missing_values=np.nan, strategy='median'),
-                'knn': KNNImputer(n_neighbors=5),
-            }[imputer]
-        else:
-            self.imputer = None
-
     def preprocess(self, x, y=None):
-        # label smoothing
-        # q = x.isnull().any(axis=1)
-        # epsilon = 0.6
-        # y[q] *= epsilon
-        # y[q] += (1-epsilon)/2
-        if self.imputer:
-            x = self.imputer.fit(x)
+        x[x.isna()] = -1
         return x, y
 
-    def _train(self, x_train, y_train, x_valid, y_valid):
+    def _train(self, x_train, y_train, x_valid, y_valid, fold):
         dtrain = xgb.DMatrix(x_train, label=y_train)
         dtest = xgb.DMatrix(x_valid, label=y_valid)
 
@@ -199,17 +183,18 @@ class SVMBench(Bench):
         self.imputer = {
             'simple': SimpleImputer(missing_values=np.nan, strategy='median'),
             'knn': KNNImputer(n_neighbors=5),
+            'none': None,
         }[imputer]
         self.svm_kernel = svm_kernel
 
     def preprocess(self, x, y=None):
-        x[x.isna()] = -1
-        # if self.imputer:
-        #     self.imputer.fit(x)
-        #     x = self.imputer.transform(x)
+        if self.imputer:
+            self.imputer.fit(x)
+            x = self.imputer.transform(x)
+        x[np.isnan(x)] = -1
         return x, y
 
-    def _train(self, x_train, y_train, x_valid, y_valid):
+    def _train(self, x_train, y_train, x_valid, y_valid, fold):
         param_list = [0.001, 0.01, 0.1, 1, 10]
         best_score = 0
         best_parameters = {}
@@ -310,10 +295,10 @@ class NNBench(Bench):
             epsilon = 0.6
             y[q] *= epsilon
             y[q] += (1-epsilon)/2
-        x[x.isna()] = -1000
+        x[x.isna()] = -1
         return x, y
 
-    def _train(self, x_train, y_train, x_valid, y_valid):
+    def _train(self, x_train, y_train, x_valid, y_valid, fold):
         model = NNModel(num_feature=x_train.shape[-1], num_classes=1)
         train_loader = self.as_loader(x_train, y_train)
         valid_loader = self.as_loader(x_valid, y_valid)

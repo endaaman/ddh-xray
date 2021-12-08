@@ -23,6 +23,19 @@ from datasets import cols_cat, col_target, cols_feature, cols_extend
 optuna.logging.disable_default_handler()
 
 
+def fill_by_opposite(df):
+    for i in df.index:
+        for v in ['a', 'b', 'oe', 'alpha']:
+            left = np.isnan(df[f'left_{v}'][i])
+            right = np.isnan(df[f'right_{v}'][i])
+            if not left ^ right:
+                continue
+            if left:
+                df[f'left_{v}'][i] = df[f'right_{v}'][i]
+                # print(f'fill: [{i}] right {v}')
+            if right:
+                df[f'left_{v}'][i] = df[f'right_{v}'][i]
+                # print(f'fill: [{i}] left {v}')
 
 class Table(Commander):
     def get_suffix(self):
@@ -30,9 +43,11 @@ class Table(Commander):
 
     def arg_common(self, parser):
         parser.add_argument('-r', '--test-ratio', type=float)
-        parser.add_argument('-e', '--seed', type=int, default=42)
+        parser.add_argument('--seed', type=int, default=42)
         parser.add_argument('-s', '--suffix')
         parser.add_argument('-o', '--optuna', action='store_true')
+        parser.add_argument('--aug-flip', action='store_true')
+        parser.add_argument('--aug-fill', action='store_true')
 
     def pre_common(self):
         np.random.seed(self.args.seed)
@@ -78,6 +93,23 @@ class Table(Commander):
         df_ind = pd.concat([df_table_ind, df_measure_ind], axis=1)
         self.df_ind = df_ind[cols_feature + [col_target]]
 
+        df_manual = pd.read_excel('data/manual_ind.xlsx', index_col=0)
+        self.df_manual = df_manual[cols_feature + [col_target]]
+
+        if self.args.aug_fill:
+            fill_by_opposite(self.df_train)
+            fill_by_opposite(self.df_test)
+            fill_by_opposite(self.df_ind)
+
+        if self.args.aug_flip:
+            df_train_mirror = self.df_train.copy()
+            df_train_mirror[['left_a', 'right_a']] = self.df_train[['right_a', 'left_a']]
+            df_train_mirror[['left_b', 'right_b']] = self.df_train[['right_b', 'left_b']]
+            df_train_mirror[['left_oe', 'right_oe']] = self.df_train[['right_oe', 'left_oe']]
+            df_train_mirror[['left_alpha', 'right_alpha']] = self.df_train[['right_alpha', 'left_alpha']]
+            print(df_train_mirror)
+            self.df_train = pd.concat([self.df_train, df_train_mirror])
+
     def run_demo(self):
         print(len(self.df_test))
         print(len(self.df_train))
@@ -92,7 +124,6 @@ class Table(Commander):
             'xgb': lambda: XGBBench(
                 num_folds=args.folds,
                 seed=args.seed,
-                imputer=args.imputer,
             ),
             'svm': lambda: SVMBench(
                 num_folds=args.folds,
@@ -109,7 +140,7 @@ class Table(Commander):
         return [t[m]() for m in args.model]
 
     def arg_train(self, parser):
-        parser.add_argument('--roc', action='store_true')
+        parser.add_argument('--no-show-roc', action='store_true')
         parser.add_argument('--folds', type=int, default=5)
         parser.add_argument('-i', '--imputer')
         parser.add_argument('-m', '--model', default=['gbm'], nargs='+', choices=['gbm', 'xgb', 'svm', 'nn'])
@@ -139,17 +170,14 @@ class Table(Commander):
         torch.save(checkpoint, p)
         print(f'wrote {p}')
 
-
-        # train meta model
         x_train = self.df_train[cols_feature]
         y_train = self.df_train[col_target]
         preds_train = self.predict_benchs(benchs, x_train)
         self.meta_model.fit(preds_train, y_train)
 
-        if self.args.roc:
-            self.draw_roc(benchs)
+        self.evaluate(benchs, not self.args.no_show_roc)
 
-    def draw_roc(self, benchs):
+    def evaluate(self, benchs, show_roc):
         data = {
             'train': {
                 'x': self.df_train[cols_feature],
@@ -162,7 +190,11 @@ class Table(Commander):
             'ind': {
                 'x': self.df_ind[cols_feature],
                 'y': self.df_ind[col_target],
-            }
+            },
+            'manual': {
+                'x': self.df_manual[cols_feature],
+                'y': self.df_manual[col_target],
+            },
         }
 
         for (t, v) in data.items():
@@ -184,7 +216,6 @@ class Table(Commander):
             fpr, tpr, thresholds = metrics.roc_curve(y, pred)
             sums = tpr + 1 - fpr
             if t == 'train':
-                print(sums)
                 best_index = np.argmax(sums)
                 threshold = thresholds[best_index]
             else:
@@ -193,29 +224,41 @@ class Table(Commander):
                 # print(f'test fpr: {fpr[best_index]}')
             auc = metrics.auc(fpr, tpr)
             result[t] = {
-                'gt': y.values,
-                'pred': pred,
                 'thresholds': thresholds,
                 'tpr': tpr,
                 'fpr': fpr,
             }
-            plt.plot(fpr, tpr, label=f'{t} auc = {auc:.2f}')
+            plt.plot(fpr, tpr, label=f'{t} auc={auc:.3f}')
         print(f'best threshold: {threshold}')
 
+        output ={
+            'threshold': threshold,
+            'result': result,
+            'data': data,
+        }
+
+        self.output = output
         self.threshold = threshold
-        self.data = data
 
         plt.legend()
         plt.title('ROC curve')
         plt.xlabel('False Positive Rate')
         plt.ylabel('True Positive Rate')
         plt.grid(True)
+        if show_roc:
+            plt.show()
+
+        for t in ['ind', 'manual']:
+            pred = data[t]['pred'] > threshold
+            gt = data[t]['y'].values > 0.1
+            cm = metrics.confusion_matrix(gt, pred)
+            print(f'{t}: ', cm)
+
         fig_path = f'out/roc{self.get_suffix()}.png'
         plt.savefig(fig_path)
-        plt.show()
-        result_path = f'out/result{self.get_suffix()}.pt'
-        torch.save(result, result_path)
-        print(f'wrote {fig_path} and {result_path}')
+        output_path = f'out/output{self.get_suffix()}.pt'
+        torch.save(output, output_path)
+        print(f'wrote {fig_path} and {output_path}')
 
     def arg_roc(self, parser):
         parser.add_argument('-c', '--checkpoint')
@@ -225,7 +268,7 @@ class Table(Commander):
         train_args = checkpoint['args']
         bench = self.create_bench_by_args(args)
         bench.restore(checkpoint['model_data'])
-        self.draw_roc(bench)
+        self.evaluate(bench, True)
 
     def arg_violin(self, parser):
         parser.add_argument('-m', '--mode', default='train', choices=['train', 'test'])
@@ -271,7 +314,6 @@ class Table(Commander):
         print(m)
         o = pd.DataFrame(m)
         o.to_excel('out/mean_std.xlsx', index=False)
-
 
 t = Table()
 t.run()
