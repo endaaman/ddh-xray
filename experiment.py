@@ -34,29 +34,29 @@ class Experiment(Commander):
         print('done.')
 
     def run_compare_roc(self):
-        models = ['gbm', 'nn', 'svm']
-        ss = []
+        code_names = ['gbm', 'nn', 'svm']
+        names = ['LightGBM', 'NN', 'SVM']
+        codes = OrderedDict()
         for c in range(1, 4):
             for ii in list(combinations(range(0, 3), c)):
-                ss.append('_'.join([models[i] for i in ii]))
+                code = '_'.join([code_names[i] for i in ii])
+                name = ' + '.join([names[i] for i in ii])
+                codes[code] = name
 
-        outputs = OrderedDict()
-        for s in ss:
-            outputs[s] = torch.load(f'out/output_exp_{s}.pt')
-        self.outputs = outputs
-
-        for (s, o) in outputs.items():
+        for (code, name) in codes.items():
+            o = torch.load(f'out/output_exp_{code}.pt')
             y = o['data']['test']['y']
             pred = o['data']['test']['pred']
             fpr, tpr, thresholds = metrics.roc_curve(y, pred)
             auc = metrics.auc(fpr, tpr)
-            plt.plot(fpr, tpr, label=f'{s}: {auc:.3f}')
+            plt.plot(fpr, tpr, label=f'{name}: {auc:.3f}')
 
         plt.legend()
         plt.title('ROC curve')
         plt.xlabel('False Positive Rate')
         plt.ylabel('True Positive Rate')
         plt.grid(True)
+        plt.savefig('out/roc_compare.png')
         plt.show()
 
 
