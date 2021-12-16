@@ -16,10 +16,10 @@ class Experiment(Commander):
     def pre_common(self):
         pass
 
-    def arg_comb(self, parser):
+    def arg_models(self, parser):
         parser.add_argument('-e', '--seed', type=int, default=42)
 
-    def run_comb(self):
+    def run_models(self):
         models = ['gbm', 'nn', 'svm']
         for c in range(1, 4):
             for ii in list(combinations(range(0, 3), c)):
