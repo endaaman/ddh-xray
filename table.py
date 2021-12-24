@@ -1,9 +1,11 @@
 import random
 import os
 import copy
+from collections import OrderedDict
+
 from PIL import Image
 import numpy as np
-from matplotlib import pyplot as plt
+import matplotlib.pyplot as plt
 import seaborn as sns
 import torch
 from torch import nn
@@ -137,13 +139,13 @@ class Table(Commander):
                 epoch=200,
             ),
         }
-        return [t[m]() for m in args.model]
+        return [t[m]() for m in args.models]
 
     def arg_train(self, parser):
-        parser.add_argument('--no-show-roc', action='store_true')
+        parser.add_argument('--no-show-fig', action='store_true')
         parser.add_argument('--folds', type=int, default=5)
         parser.add_argument('-i', '--imputer')
-        parser.add_argument('-m', '--model', default=['gbm'], nargs='+', choices=['gbm', 'xgb', 'svm', 'nn'])
+        parser.add_argument('-m', '--models', default=['gbm'], nargs='+', choices=['gbm', 'xgb', 'svm', 'nn'])
         parser.add_argument('-k', '--kernel', default='rbf')
         parser.add_argument('-g', '--gather', default='median', choices=['median', 'mean', 'reg'])
         parser.add_argument('-b', '--mean-by-bench', action='store_true')
@@ -175,9 +177,9 @@ class Table(Commander):
         preds_train = self.predict_benchs(benchs, x_train)
         self.meta_model.fit(preds_train, y_train)
 
-        self.evaluate(benchs, not self.args.no_show_roc)
+        self.evaluate(benchs, not self.args.no_show_fig)
 
-    def evaluate(self, benchs, show_roc):
+    def evaluate(self, benchs, show_fig):
         data = {
             'train': {
                 'x': self.df_train[cols_feature],
@@ -209,15 +211,25 @@ class Table(Commander):
                 raise RuntimeError(f'Invalid gather rule: {self.args.gather}')
             v['pred'] = pred
 
+        thresholds = []
+        threshold = OrderedDict()
         result = {}
         for t in ['train', 'test']:
             y = data[t]['y']
             pred = data[t]['pred']
             fpr, tpr, thresholds = metrics.roc_curve(y, pred)
-            sums = tpr + 1 - fpr
             if t == 'train':
-                best_index = np.argmax(sums)
-                threshold = thresholds[best_index]
+                # youden
+                sums = tpr + 1 - fpr
+                threshold['youden'] = thresholds[np.argmax(sums)]
+
+                # top-left
+                sums = (- tpr + 1) ** 2 + fpr ** 2
+                threshold['top-left'] = thresholds[np.argmin(sums)]
+
+                # bottom-right
+                sums = tpr ** 2 + (-fpr + 1) ** 2
+                threshold['bottom-right'] = thresholds[np.argmax(sums)]
             else:
                 pass
                 # print(f'test tpr: {tpr[best_index]}')
@@ -229,7 +241,6 @@ class Table(Commander):
                 'fpr': fpr,
             }
             plt.plot(fpr, tpr, label=f'{t} auc={auc:.3f}')
-        print(f'best threshold: {threshold}')
 
         output ={
             'threshold': threshold,
@@ -245,20 +256,46 @@ class Table(Commander):
         plt.xlabel('False Positive Rate')
         plt.ylabel('True Positive Rate')
         plt.grid(True)
-        if show_roc:
+        if show_fig:
             plt.show()
 
-        for t in ['ind', 'manual']:
-            pred = data[t]['pred'] > threshold
-            gt = data[t]['y'].values > 0.1
-            cm = metrics.confusion_matrix(gt, pred)
-            print(f'{t}: ', cm)
+        plt.savefig(f'out/roc{self.get_suffix()}.png')
+        plt.close()
 
-        fig_path = f'out/roc{self.get_suffix()}.png'
-        plt.savefig(fig_path)
+        fig = plt.figure(figsize=(16, 16), constrained_layout=True)
+        fig.suptitle(f'Models: {" + ".join(self.args.models)}')
+        targets = ['test', 'ind', 'manual']
+        for row, (n, th) in enumerate(threshold.items()):
+            print(f'threshold {n}: {th:.4f}')
+            for col, t in enumerate(targets):
+                pred = data[t]['pred'] > th
+                gt = data[t]['y'].values > 0.1
+                cm = metrics.confusion_matrix(gt, pred)
+                print(f'{t}: ', cm)
+
+                ax = fig.add_subplot(3, 3, row*3+col+1)
+                ax.matshow(cm, cmap=plt.cm.GnBu)
+                for i in range(cm.shape[1]):
+                    for j in range(cm.shape[0]):
+                        ax.text(x=j, y=i, s=cm[i, j], va='center', ha='center', )
+                sens = cm[1, 1] / cm[1].sum()
+                spec = cm[0, 0] / cm[0].sum()
+
+                ax.set_ylabel('Ground truth')
+                ax.set_xlabel('Prediction')
+                ax.xaxis.set_label_position('bottom')
+                ax.xaxis.set_ticks_position('bottom')
+                ax.set_title(f'[{t}] threshold={th:.3f}({n})\nsens:{sens:.2f} spec:{spec:.2f}')
+
+        # plt.subplots_adjust(left=0.125, bottom=0.1, right=0.9, top=0.9, wspace=0.2, hspace=0.2)
+        # plt.tight_layout()
+        if show_fig:
+            plt.show()
+        plt.savefig(f'out/cm{self.get_suffix()}.png')
+
         output_path = f'out/output{self.get_suffix()}.pt'
         torch.save(output, output_path)
-        print(f'wrote {fig_path} and {output_path}')
+        print(f'wrote output to {output_path}')
 
     def arg_roc(self, parser):
         parser.add_argument('-c', '--checkpoint')
@@ -314,6 +351,23 @@ class Table(Commander):
         print(m)
         o = pd.DataFrame(m)
         o.to_excel('out/mean_std.xlsx', index=False)
+
+
+    def run_cm(self):
+        cm =  np.array([[38,  8], [ 0,  2]])
+
+        fig = plt.figure(figsize=(5, 5))
+        ax = fig.add_subplot(1, 2, 2)
+        ax.matshow(cm, cmap=plt.cm.GnBu)
+        for i in range(cm.shape[1]):
+            for j in range(cm.shape[0]):
+                ax.text(x=j, y=i, s=cm[i, j], va='center', ha='center', )
+        sens = cm[1, 1] / cm[1].sum()
+        spec = cm[0, 0] / cm[0].sum()
+        ax.set_ylabel('Ground truth')
+        ax.set_xlabel('Prediction')
+        ax.set_title(f'Sens: {sens:.2f} Spec: {spec:.2f}')
+        plt.show()
 
 t = Table()
 t.run()
