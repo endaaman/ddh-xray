@@ -3,6 +3,7 @@ from itertools import combinations
 from collections import OrderedDict
 
 import torch
+import pandas as pd
 from matplotlib import pyplot as plt
 from sklearn import metrics
 
@@ -27,13 +28,14 @@ class Experiment(Commander):
                 params = ' '.join([str(i) for i in mm])
                 suffix = '_'.join([str(i) for i in mm])
                 # python table.py train -m gbm --no-show-roc
-                command = f'python table.py train --no-show-roc -m {params} -s exp_{suffix} --seed {self.args.seed}'
+                command = f'python table.py train --no-show-fig -m {params} -s exp_{suffix} --seed {self.args.seed}'
+                print(f'RUN: {command}')
                 cp = subprocess.run(command, shell=True)
                 print(cp)
 
         print('done.')
 
-    def run_compare_roc(self):
+    def run_compare_models(self):
         code_names = ['gbm', 'nn', 'svm']
         names = ['LightGBM', 'NN', 'SVM']
         codes = OrderedDict()
@@ -43,6 +45,8 @@ class Experiment(Commander):
                 name = ' + '.join([names[i] for i in ii])
                 codes[code] = name
 
+        df = pd.DataFrame()
+
         for (code, name) in codes.items():
             o = torch.load(f'out/output_exp_{code}.pt')
             y = o['data']['test']['y']
@@ -50,6 +54,16 @@ class Experiment(Commander):
             fpr, tpr, thresholds = metrics.roc_curve(y, pred)
             auc = metrics.auc(fpr, tpr)
             plt.plot(fpr, tpr, label=f'{name}: {auc:.3f}')
+            row = {'name': name, 'auc': auc}
+            for t in ['youden', 'top_left', 'bottom_right']:
+                threshold = o['threshold'][t]
+                pred = o['data']['test']['pred'] > threshold
+                gt = o['data']['test']['y'].values
+                cm = metrics.confusion_matrix(gt, pred)
+                row[f'sens({t})'] = cm[1, 1] / cm[1].sum()
+                row[f'spec({t})'] = cm[0, 0] / cm[0].sum()
+            df = df.append(row, ignore_index=True)
+        df.to_excel('out/compare_models.xlsx', header=df.columns, float_format='%.4f')
 
         plt.legend()
         plt.title('ROC curve')

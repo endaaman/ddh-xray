@@ -19,7 +19,7 @@ import optuna
 
 from endaaman import Commander
 from bench import LightGBMBench, XGBBench, SVMBench, NNBench
-from datasets import cols_cat, col_target, cols_feature, cols_extend
+from datasets import cols_cat, col_target, cols_feature, cols_extend, col_to_label
 
 
 optuna.logging.disable_default_handler()
@@ -74,9 +74,6 @@ class Table(Commander):
         df_train = pd.concat([df_train, df_measure_train], axis=1)
         df_test = pd.concat([df_test, df_measure_test], axis=1)
 
-        # self.meta_model = LogisticRegression()
-        self.meta_model = LinearRegression()
-
         self.df_org = pd.concat([df_train, df_test])
         self.df_all = self.df_org[cols_feature + [col_target]]
         # self.df_all.loc[:, cols_cat]= self.df_all[cols_cat].astype('category')
@@ -111,6 +108,9 @@ class Table(Commander):
             df_train_mirror[['left_alpha', 'right_alpha']] = self.df_train[['right_alpha', 'left_alpha']]
             print(df_train_mirror)
             self.df_train = pd.concat([self.df_train, df_train_mirror])
+
+        # self.meta_model = LogisticRegression()
+        self.meta_model = LinearRegression()
 
     def run_demo(self):
         print(len(self.df_test))
@@ -211,7 +211,6 @@ class Table(Commander):
                 raise RuntimeError(f'Invalid gather rule: {self.args.gather}')
             v['pred'] = pred
 
-        thresholds = []
         threshold = OrderedDict()
         result = {}
         for t in ['train', 'test']:
@@ -225,11 +224,11 @@ class Table(Commander):
 
                 # top-left
                 sums = (- tpr + 1) ** 2 + fpr ** 2
-                threshold['top-left'] = thresholds[np.argmin(sums)]
+                threshold['top_left'] = thresholds[np.argmin(sums)]
 
                 # bottom-right
                 sums = tpr ** 2 + (-fpr + 1) ** 2
-                threshold['bottom-right'] = thresholds[np.argmax(sums)]
+                threshold['bottom_right'] = thresholds[np.argmax(sums)]
             else:
                 pass
                 # print(f'test tpr: {tpr[best_index]}')
@@ -249,7 +248,6 @@ class Table(Commander):
         }
 
         self.output = output
-        self.threshold = threshold
 
         plt.legend()
         plt.title('ROC curve')
@@ -325,7 +323,7 @@ class Table(Commander):
         print(f'wrote {p}')
         plt.show()
 
-    def run_mean_std(self):
+    def run_mean_se(self):
         m = []
 
         bool_keys = ['female', 'breech_presentation', 'treatment']
@@ -343,14 +341,14 @@ class Table(Commander):
             texts = []
             for df in [self.df_test, self.df_train]:
                 mean = df[col].mean()
-                std = df[col].std()
+                std = df[col].std(ddof=1) / np.sqrt(np.size(df[col]))
                 texts.append(f'{mean:.2f}±{std:.2f}')
             print(f'{col:<8}: ' + ' '.join(texts))
             m.append([col] + texts)
         self.m = m
         print(m)
         o = pd.DataFrame(m)
-        o.to_excel('out/mean_std.xlsx', index=False)
+        o.to_excel('out/mean_se.xlsx', index=False, header=['column', 'test', 'train'])
 
 
     def run_cm(self):

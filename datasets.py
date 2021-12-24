@@ -47,6 +47,19 @@ cols_extend = {
 }
 cols_feature = cols_cat + cols_val + list(cols_extend.keys())
 
+col_to_label = {
+    'female': 'Female',
+    'breech_presentation': 'Breech presentation',
+    'left_a': 'Left A',
+    'right_a': 'Right A',
+    'left_b': 'Left B',
+    'right_b': 'Right B',
+    'left_alpha': 'Left α',
+    'right_alpha': 'Right α',
+    'left_oe': 'Left OE',
+    'right_oe': 'Right OE',
+}
+
 
 IMAGE_SIZE = 624
 
