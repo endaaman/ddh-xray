@@ -63,7 +63,7 @@ class Experiment(Commander):
                 row[f'sens({t})'] = cm[1, 1] / cm[1].sum()
                 row[f'spec({t})'] = cm[0, 0] / cm[0].sum()
             df = df.append(row, ignore_index=True)
-        df.to_excel('out/compare_models.xlsx', header=df.columns, float_format='%.4f')
+        df.to_excel('out/compare_models.xlsx', header=df.columns, index=False, float_format='%.4f')
 
         plt.legend()
         plt.title('ROC curve')
