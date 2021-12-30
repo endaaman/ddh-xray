@@ -45,7 +45,7 @@ class Table(Commander):
 
     def arg_common(self, parser):
         parser.add_argument('-r', '--test-ratio', type=float)
-        parser.add_argument('--seed', type=int, default=42)
+        parser.add_argument('--seed', type=int, default=34)
         parser.add_argument('-s', '--suffix')
         parser.add_argument('-o', '--optuna', action='store_true')
         parser.add_argument('--aug-flip', action='store_true')
@@ -218,6 +218,10 @@ class Table(Commander):
             pred = data[t]['pred']
             fpr, tpr, thresholds = metrics.roc_curve(y, pred)
             if t == 'train':
+                # f1
+                f1_scores = [metrics.f1_score(y, pred > t) for t in thresholds]
+                threshold['f1'] = thresholds[np.argmax(f1_scores)]
+
                 # youden
                 sums = tpr + 1 - fpr
                 threshold['youden'] = thresholds[np.argmax(sums)]
@@ -271,7 +275,7 @@ class Table(Commander):
                 cm = metrics.confusion_matrix(gt, pred)
                 print(f'{t}: ', cm)
 
-                ax = fig.add_subplot(3, 3, row*3+col+1)
+                ax = fig.add_subplot(len(threshold.keys()), len(targets), row*3+col+1)
                 ax.matshow(cm, cmap=plt.cm.GnBu)
                 for i in range(cm.shape[1]):
                     for j in range(cm.shape[0]):
