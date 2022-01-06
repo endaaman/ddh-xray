@@ -213,7 +213,7 @@ class Table(Commander):
 
         threshold = OrderedDict()
         result = {}
-        for t in ['train', 'test']:
+        for t in ['train', 'test', 'ind']:
             y = data[t]['y']
             pred = data[t]['pred']
             fpr, tpr, thresholds = metrics.roc_curve(y, pred)
@@ -223,16 +223,16 @@ class Table(Commander):
                 threshold['f1'] = thresholds[np.argmax(f1_scores)]
 
                 # youden
-                sums = tpr + 1 - fpr
+                sums = tpr - fpr
                 threshold['youden'] = thresholds[np.argmax(sums)]
 
                 # top-left
                 sums = (- tpr + 1) ** 2 + fpr ** 2
-                threshold['top_left'] = thresholds[np.argmin(sums)]
+                threshold['top-left'] = thresholds[np.argmin(sums)]
 
                 # bottom-right
-                sums = tpr ** 2 + (-fpr + 1) ** 2
-                threshold['bottom_right'] = thresholds[np.argmax(sums)]
+                # sums = tpr ** 2 + (-fpr + 1) ** 2
+                # threshold['bottom_right'] = thresholds[np.argmax(sums)]
             else:
                 pass
                 # print(f'test tpr: {tpr[best_index]}')
@@ -264,18 +264,21 @@ class Table(Commander):
         plt.savefig(f'out/roc{self.get_suffix()}.png')
         plt.close()
 
-        fig = plt.figure(figsize=(16, 16), constrained_layout=True)
-        fig.suptitle(f'Models: {" + ".join(self.args.models)}')
-        targets = ['test', 'ind', 'manual']
-        for row, (n, th) in enumerate(threshold.items()):
+        # targets = ['test', 'ind', 'manual']
+        targets = ['ind']
+
+        fig = plt.figure(figsize=(16, len(targets)*5), constrained_layout=True)
+        # fig.suptitle(f'Models: {" + ".join(self.args.models)}')
+
+        for col, (n, th) in enumerate(threshold.items()):
             print(f'threshold {n}: {th:.4f}')
-            for col, t in enumerate(targets):
+            for row, t in enumerate(targets):
                 pred = data[t]['pred'] > th
                 gt = data[t]['y'].values > 0.1
                 cm = metrics.confusion_matrix(gt, pred)
                 print(f'{t}: ', cm)
 
-                ax = fig.add_subplot(len(threshold.keys()), len(targets), row*3+col+1)
+                ax = fig.add_subplot(len(targets), len(threshold.keys()), row*3+col+1)
                 ax.matshow(cm, cmap=plt.cm.GnBu)
                 for i in range(cm.shape[1]):
                     for j in range(cm.shape[0]):
@@ -287,13 +290,13 @@ class Table(Commander):
                 ax.set_xlabel('Prediction')
                 ax.xaxis.set_label_position('bottom')
                 ax.xaxis.set_ticks_position('bottom')
-                ax.set_title(f'[{t}] threshold={th:.3f}({n})\nsens:{sens:.2f} spec:{spec:.2f}')
+                ax.set_title(f'{n} threshold={th:.3f}\nsensitivity:{sens:.3f} specificity:{spec:.3f}')
 
         # plt.subplots_adjust(left=0.125, bottom=0.1, right=0.9, top=0.9, wspace=0.2, hspace=0.2)
         # plt.tight_layout()
+        plt.savefig(f'out/cm{self.get_suffix()}.png')
         if show_fig:
             plt.show()
-        plt.savefig(f'out/cm{self.get_suffix()}.png')
 
         output_path = f'out/output{self.get_suffix()}.pt'
         torch.save(output, output_path)
@@ -327,13 +330,15 @@ class Table(Commander):
         print(f'wrote {p}')
         plt.show()
 
-    def run_mean_se(self):
+    def run_mean(self):
         m = []
+
+        dfs = [self.df_train, self.df_test, self.df_ind]
 
         bool_keys = ['female', 'breech_presentation', 'treatment']
         for col in bool_keys:
             texts = []
-            for df in [self.df_test, self.df_train]:
+            for df in dfs:
                 t = 100 * df[col].sum() / len(df[col])
                 f = 100 - t
                 texts.append(f'{t:.1f}% : {f:.1f}%')
@@ -343,17 +348,17 @@ class Table(Commander):
         float_keys = ['left_alpha', 'right_alpha', 'left_oe', 'right_oe', 'left_a', 'right_a', 'left_b', 'right_b']
         for col in float_keys:
             texts = []
-            for df in [self.df_test, self.df_train]:
+            for df in dfs:
                 mean = df[col].mean()
                 std = df[col].std(ddof=1) / np.sqrt(np.size(df[col]))
                 texts.append(f'{mean:.2f}±{std:.2f}')
             print(f'{col:<8}: ' + ' '.join(texts))
             m.append([col] + texts)
         self.m = m
-        print(m)
         o = pd.DataFrame(m)
-        o.to_excel('out/mean_se.xlsx', index=False, header=['column', 'test', 'train'])
 
+        header = [f'{label} ({len(df)} cases)' for label, df in zip(['train', 'test', 'independent'], dfs)]
+        o.to_excel('out/mean.xlsx', index=False, header=['column'] + header)
 
     def run_cm(self):
         cm =  np.array([[38,  8], [ 0,  2]])

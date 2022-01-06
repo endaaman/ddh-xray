@@ -4,7 +4,7 @@ class Visualize(Commander):
     pass
 
 class Visalize(Commander):
-    def run_model(self):
+    def run_flops(self):
         pass
 
 v = Visalize()

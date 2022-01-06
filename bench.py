@@ -85,7 +85,7 @@ class LightGBMBench(Bench):
     def train(self, df_train, target_col):
         r = super().train(df_train, target_col)
 
-        df_tmp = self.df_feature_importance.groupby('feature').agg("mean").reset_index()
+        df_tmp = self.df_feature_importance.groupby('feature').agg('mean').reset_index()
         df_tmp = df_tmp.sort_values('importance', ascending=False)
         print(df_tmp[['feature', 'importance']])
 
