@@ -11,6 +11,7 @@ import torch
 from torch import nn
 import pandas as pd
 from tqdm import tqdm
+import scipy.stats as st
 
 from sklearn import metrics
 from sklearn.model_selection import StratifiedKFold, KFold, train_test_split
@@ -333,31 +334,43 @@ class Table(Commander):
     def run_mean(self):
         m = []
 
-        dfs = [self.df_train, self.df_test, self.df_ind]
+        dfs = OrderedDict((
+            ('test', self.df_test),
+            ('train', self.df_train),
+            ('ind', self.df_ind),
+        ))
 
         bool_keys = ['female', 'breech_presentation', 'treatment']
         for col in bool_keys:
             texts = []
-            for df in dfs:
-                t = 100 * df[col].sum() / len(df[col])
-                f = 100 - t
-                texts.append(f'{t:.1f}% : {f:.1f}%')
+            for (name, df) in dfs.items():
+                a = 100 * df[col].sum() / len(df[col])
+                b = 100 - a
+                v = f'{a:.1f}% : {b:.1f}%'
+                if name != 'test':
+                    t, p = st.ttest_ind(df[col].values, dfs['test'][col].values, equal_var=False)
+                    v += f'(p={p:.4f})'
+                texts.append(v)
             print(f'{col}: ' + ' '.join(texts))
             m.append([col] + texts)
 
         float_keys = ['left_alpha', 'right_alpha', 'left_oe', 'right_oe', 'left_a', 'right_a', 'left_b', 'right_b']
         for col in float_keys:
             texts = []
-            for df in dfs:
+            for (name, df) in dfs.items():
                 mean = df[col].mean()
                 std = df[col].std(ddof=1) / np.sqrt(np.size(df[col]))
-                texts.append(f'{mean:.2f}±{std:.2f}')
+                v = f'{mean:.2f}±{std:.2f}'
+                if name != 'test':
+                    t, p = st.ttest_ind(df[col].dropna().values, dfs['test'][col].dropna().values, equal_var=False)
+                    v += f'(p={p:.4f})'
+                texts.append(v)
             print(f'{col:<8}: ' + ' '.join(texts))
             m.append([col] + texts)
         self.m = m
         o = pd.DataFrame(m)
 
-        header = [f'{label} ({len(df)} cases)' for label, df in zip(['train', 'test', 'independent'], dfs)]
+        header = [f'{label} ({len(df)} cases)' for label, (name, df) in zip(['test', 'train', 'independent'], dfs.items())]
         o.to_excel('out/mean.xlsx', index=False, header=['column'] + header)
 
     def run_cm(self):
