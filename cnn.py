@@ -11,13 +11,16 @@ import numpy as np
 import matplotlib
 from matplotlib import ticker, pyplot as plt
 import torch
-import torch.optim as optim
+from torch import optim
 from torchvision import transforms
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import albumentations as A
 from effdet import EfficientDet, DetBenchTrain, get_efficientdet_config
 from effdet.efficientdet import HeadNet
+import yolov5
+from ptflops import get_model_complexity_info
+from yolov5.models.yolo import Model as Yolo5
 
 from datasets import ROIDataset
 from utils import get_state_dict
@@ -38,7 +41,7 @@ SIZE_BY_DEPTH = {
 }
 
 
-class MyTrainer(TorchCommander):
+class CNN(TorchCommander):
     def arg_common(self, parser):
         parser.add_argument('-e', '--epoch', type=int, default=50)
         parser.add_argument('-b', '--batch-size', type=int, default=16)
@@ -178,19 +181,25 @@ class MyTrainer(TorchCommander):
         torch.save(weights, weights_path)
         return weights_path
 
-    def create_model(self):
-        if self.model_name == 'yolo':
+    def create_model(self, model_name=None):
+        if not model_name:
+            model_name = self.model_name
+
+        if model_name == 'yolo':
             model = YOLOv3()
-        elif self.model_name == 'yolor':
+        elif model_name == 'yolor':
             model = Yolor(num_classes=7)
-        elif self.model_name == 'effdet':
+        elif model_name == 'yolo5':
+            # model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
+             model = Yolo5(cfg='cfg/yolov5s.yaml')
+        elif model_name == 'effdet':
             cfg = get_efficientdet_config(f'tf_efficientdet_{self.sub_name}')
             cfg.num_classes = 6
             model = EfficientDet(cfg)
-        elif self.model_name == 'ssd':
+        elif model_name == 'ssd':
             model = SSD300(n_classes=7)
         else:
-            raise ValueError(f'Ivalid model_name: {self.model_name}')
+            raise ValueError(f'Ivalid model_name: {model_name}')
 
         return model.to(self.device).train()
 
@@ -366,4 +375,20 @@ class MyTrainer(TorchCommander):
         weights_path = self.save_weights(model, 0, {}, {})
         print(weights_path)
 
-MyTrainer().run()
+    def run_flops(self):
+        for model_name in ['yolo', 'ssd', 'yolo5']:
+            model = self.create_model(model_name)
+            flops, params = get_model_complexity_info(
+                model,
+                (3, 512, 512, ),
+                as_strings=True,
+                print_per_layer_stat=False,
+                verbose=False,
+            )
+            flops = flops[:-5]
+            params = params[:-2]
+            batch = 1
+            print(f'{model_name}: {params}M param {flops}G flops')
+
+c = CNN()
+c.run()
