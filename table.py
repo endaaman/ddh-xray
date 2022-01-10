@@ -349,7 +349,7 @@ class Table(Commander):
                 v = f'{a:.1f}% : {b:.1f}%'
                 if name != 'test':
                     t, p = st.ttest_ind(df[col].values, dfs['test'][col].values, equal_var=False)
-                    v += f'(p={p:.4f})'
+                    v += f'(p={p:.3f})'
                 texts.append(v)
             print(f'{col}: ' + ' '.join(texts))
             m.append([col] + texts)
@@ -363,7 +363,7 @@ class Table(Commander):
                 v = f'{mean:.2f}±{std:.2f}'
                 if name != 'test':
                     t, p = st.ttest_ind(df[col].dropna().values, dfs['test'][col].dropna().values, equal_var=False)
-                    v += f'(p={p:.4f})'
+                    v += f'(p={p:.3f})'
                 texts.append(v)
             print(f'{col:<8}: ' + ' '.join(texts))
             m.append([col] + texts)
