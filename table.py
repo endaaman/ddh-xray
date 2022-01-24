@@ -41,22 +41,18 @@ def fill_by_opposite(df):
                 # print(f'fill: [{i}] left {v}')
 
 class Table(Commander):
-    def get_suffix(self):
-        return '_' + self.args.suffix if self.args.suffix else ''
-
     def arg_common(self, parser):
         parser.add_argument('-r', '--test-ratio', type=float)
-        parser.add_argument('--seed', type=int, default=34)
-        parser.add_argument('-s', '--suffix')
+        # parser.add_argument('--seed', type=int, default=34)
         parser.add_argument('-o', '--optuna', action='store_true')
         parser.add_argument('--aug-flip', action='store_true')
         parser.add_argument('--aug-fill', action='store_true')
 
     def pre_common(self):
-        np.random.seed(self.args.seed)
-        random.seed(self.args.seed)
-        torch.manual_seed(self.args.seed)
-        torch.cuda.manual_seed(self.args.seed)
+        # np.random.seed(self.args.seed)
+        # random.seed(self.args.seed)
+        # torch.manual_seed(self.args.seed)
+        # torch.cuda.manual_seed(self.args.seed)
 
         df_table = pd.read_excel('data/table.xlsx', index_col=0)
         df_measure_train = pd.read_excel('data/measurement_train.xlsx', index_col=0)
@@ -283,15 +279,15 @@ class Table(Commander):
                 ax.matshow(cm, cmap=plt.cm.GnBu)
                 for i in range(cm.shape[1]):
                     for j in range(cm.shape[0]):
-                        ax.text(x=j, y=i, s=cm[i, j], va='center', ha='center', )
+                        ax.text(x=j, y=i, s=cm[i, j], va='center', ha='center', size=14)
                 sens = cm[1, 1] / cm[1].sum()
                 spec = cm[0, 0] / cm[0].sum()
 
-                ax.set_ylabel('Ground truth')
-                ax.set_xlabel('Prediction')
+                ax.set_ylabel('Ground truth', fontsize=14)
+                ax.set_xlabel('Prediction', fontsize=14)
                 ax.xaxis.set_label_position('bottom')
                 ax.xaxis.set_ticks_position('bottom')
-                ax.set_title(f'{n} threshold={th:.3f}\nsensitivity:{sens:.3f} specificity:{spec:.3f}')
+                ax.set_title(f'{n} threshold={th:.3f}\nsensitivity:{sens:.3f} specificity:{spec:.3f}', fontsize=14)
 
         # plt.subplots_adjust(left=0.125, bottom=0.1, right=0.9, top=0.9, wspace=0.2, hspace=0.2)
         # plt.tight_layout()
