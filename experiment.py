@@ -16,16 +16,28 @@ from endaaman import Commander
 plt.rcParams['font.family'] = 'arial'
 
 class Experiment(Commander):
+    def savefig(self, name):
+        if self.args.tiff:
+            file_name = f'{name}.tiff'
+            dpi = 800
+        else:
+            file_name = f'{name}.png'
+            dpi = None
+
+        plt.savefig(file_name, dpi=dpi)
+        print(f'saved {file_name}')
+
+
     def arg_common(self, parser):
-        pass
+        parser.add_argument('--tiff', action='store_true')
 
     def pre_common(self):
         pass
 
-    # def arg_models(self, parser):
-    #     parser.add_argument('-e', '--seed', type=int, default=34)
+    def arg_models(self, parser):
+        parser.add_argument('-e', '--seed', type=int, default=34)
 
-    def run_models(self):
+    def run_comb(self):
         models = ['gbm', 'nn', 'svm']
         for c in range(1, 4):
             for ii in list(combinations(range(0, 3), c)):
@@ -33,14 +45,14 @@ class Experiment(Commander):
                 params = ' '.join([str(i) for i in mm])
                 suffix = '_'.join([str(i) for i in mm])
                 # python table.py train -m gbm --no-show-roc
-                command = f'python table.py train --no-show-fig -m {params} -s exp_{suffix} --seed {self.args.seed}'
+                command = f'python table.py train --no-show-fig -m {params} --suffix exp_{suffix} --seed {self.args.seed}'
                 print(f'RUN: {command}')
                 cp = subprocess.run(command, shell=True)
                 print(cp)
 
         print('done.')
 
-    def run_compare_models(self):
+    def run_compare_comb(self):
         code_names = ['gbm', 'nn', 'svm']
         names = ['LightGBM', 'NN', 'SVM']
         codes = OrderedDict()
@@ -79,10 +91,10 @@ class Experiment(Commander):
         plt.legend(loc='lower right', fontsize=12)
         plt.xlabel('1 - Specificity', fontsize=12)
         plt.ylabel('Sensitivity', fontsize=12)
+
         # plt.grid(True)
-        p = 'out/roc_compare.png'
-        plt.savefig(p)
-        print(f'wrote {p}')
+        self.savefig('out/roc_compare')
+
         plt.show()
 
     def arg_thres(self, parser):
@@ -195,7 +207,7 @@ class Experiment(Commander):
         plt.xlabel('1 - Specificity', fontsize=12)
         plt.ylabel('Sensitivity', fontsize=12)
         # plt.grid(True)
-        plt.savefig(f'out/roc_thres{self.get_suffix()}.png')
+        self.savefig(f'out/roc_thres{self.get_suffix()}')
         plt.show()
 
     def run_roc_acetabular(self):
@@ -215,7 +227,7 @@ class Experiment(Commander):
         plt.xlabel('1 - Specificity', fontsize=12)
         plt.ylabel('Sensitivity', fontsize=12)
         # plt.grid(True)
-        plt.savefig('out/roc_acetabular.png')
+        self.savefig('out/roc_acetabular')
         plt.show()
 
 ex = Experiment(defaults={'seed': 34})
