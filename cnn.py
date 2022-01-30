@@ -26,7 +26,7 @@ from datasets import ROIDataset
 from utils import get_state_dict
 from models import YOLOv3, SSD300, Yolor, yolor_loss
 from models.ssd import MultiBoxLoss
-from endaaman import TorchCommander
+from endaaman import Commander
 
 
 SIZE_BY_DEPTH = {
@@ -41,14 +41,13 @@ SIZE_BY_DEPTH = {
 }
 
 
-class CNN(TorchCommander):
+class CNN(Commander):
     def arg_common(self, parser):
         parser.add_argument('-e', '--epoch', type=int, default=50)
         parser.add_argument('-b', '--batch-size', type=int, default=16)
         parser.add_argument('--lr', type=float, default=0.01)
         parser.add_argument('--workers', type=int, default=os.cpu_count()//2)
         parser.add_argument('--no-aug', action='store_true')
-        parser.add_argument('-s', '--suffix', type=str, default='')
         parser.add_argument('--no-skip-first', action='store_true')
         parser.add_argument('-p', '--period-save-weight', type=int, default=10)
         parser.add_argument('-n', '--no-show-fig', action='store_true')
@@ -388,7 +387,24 @@ class CNN(TorchCommander):
             flops = flops[:-5]
             params = params[:-2]
             batch = 1
-            print(f'{model_name}: {params}M param {flops}G flops')
+
+            inputs = torch.ones(3, 3, 512, 512).to('cuda')
+            model.to('cuda')
+            scale = 1000
+
+            # START
+            starting_time = time.perf_counter()
+            for i in range(scale):
+                _ = model(inputs)
+            elapsed_time = time.perf_counter() - starting_time
+            # END
+            duration = elapsed_time / scale
+
+            print(f'{model_name}: {params}M param {flops}G flops {duration*1000}ms')
+
+            del model
+
+
 
 c = CNN()
 c.run()
