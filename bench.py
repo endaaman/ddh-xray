@@ -11,18 +11,22 @@ import torch
 from torch import nn, optim
 from torch.utils.data import TensorDataset, DataLoader
 
-
+from endaaman import Timer
 from datasets import cols_feature
 
 class Bench:
     def __init__(self, num_folds, seed):
         self.num_folds = num_folds
         self.seed = seed
+        self.training_time = -1
+        self.predicting_time = -1
 
     def preprocess(self, x, y=None):
         return x, y
 
     def train(self, df_train, target_col):
+        t = Timer()
+        t.start()
         folds = StratifiedKFold(n_splits=self.num_folds, shuffle=True, random_state=self.seed)
         folds = folds.split(np.arange(len(df_train)), y=df_train[target_col])
         folds = list(folds)
@@ -42,16 +46,22 @@ class Bench:
             vv[2], vv[3] = self.preprocess(*vv[2:])
             model = self._train(*vv, fold)
             models.append(model)
+        t.end()
+        self.training_time = t.ms()
         self.models = models
 
     def _train(self, x_train, y_train, x_valid, y_valid, fold):
         pass
 
     def predict(self, x):
+        t = Timer()
+        t.start()
         x, _ = self.preprocess(x.copy())
         preds = []
         for model in self.models:
             preds.append(self._predict(model, x.copy()))
+        t.end()
+        self.predicting_time = t.ms()
         return np.stack(preds, axis=1)
 
     def _predict(self, model, x):
@@ -87,7 +97,11 @@ class LightGBMBench(Bench):
 
         df_tmp = self.df_feature_importance.groupby('feature').agg('mean').reset_index()
         df_tmp = df_tmp.sort_values('importance', ascending=False)
+
+        print('IMPORTANCE')
         print(df_tmp[['feature', 'importance']])
+        # df_tmp.to_excel('out/imp_split.xlsx')
+        df_tmp.to_excel('out/imp_gain.xlsx')
 
         return r
 
@@ -121,8 +135,11 @@ class LightGBMBench(Bench):
 
         tmp = pd.DataFrame()
         tmp['feature'] = cols_feature
-        tmp['importance'] = model.feature_importance()
+        tmp['importance'] = model.feature_importance(importance_type='gain')
+        # tmp['importance'] = model.feature_importance(importance_type='split')
         tmp['fold'] = fold + 1
+        print(fold, tmp)
+        print()
         self.df_feature_importance = pd.concat([self.df_feature_importance, tmp], axis=0)
 
         return model

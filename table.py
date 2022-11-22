@@ -18,7 +18,8 @@ from sklearn.model_selection import StratifiedKFold, KFold, train_test_split
 from sklearn.linear_model import LogisticRegression, LinearRegression
 import optuna
 
-from endaaman import Commander
+from endaaman import Commander, Timer
+
 from bench import LightGBMBench, XGBBench, SVMBench, NNBench
 from datasets import cols_cat, col_target, cols_feature, cols_extend, col_to_label
 
@@ -173,6 +174,10 @@ class Table(Commander):
         y_train = self.df_train[col_target]
         preds_train = self.predict_benchs(benchs, x_train)
         self.meta_model.fit(preds_train, y_train)
+
+        for b in benchs:
+            print(type(b).__name__, 'train %.2f pred %.2f' % (b.training_time, b.predicting_time))
+        print()
 
         self.evaluate(benchs, not self.args.no_show_fig)
 
