@@ -1,15 +1,16 @@
 import os
 import re
 import shutil
-import glob
+from glob import glob
 import warnings
 import math
 import time
 import functools
 from pprint import pprint
-import pandas as pd
 from collections import namedtuple, Counter
 
+import pandas as pd
+from sklearn.model_selection import train_test_split
 from recordclass import recordclass, RecordClass
 from tqdm import tqdm
 import numpy as np
@@ -21,6 +22,8 @@ from torchvision import transforms
 from torchvision.utils import draw_bounding_boxes
 import albumentations as A
 from albumentations.pytorch.transforms import ToTensorV2
+
+from endaaman import Commander
 
 from utils import XrayBBItem, calc_mean_and_std, label_to_tensor, draw_bb, tensor_to_pil
 
@@ -61,10 +64,12 @@ col_to_label = {
 }
 
 
-IMAGE_SIZE = 624
+ORIGINAL_IMAGE_SIZE = 624
+IMAGE_MEAN = 0.4838
+IMAGE_STD = 0.3271
 
-def read_label(path):
-    with open(path, 'r') as f:
+def read_label_as_df(path):
+    with open(path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
 
     cols = ['x0', 'y0', 'x1', 'y1', 'id']
@@ -72,7 +77,7 @@ def read_label(path):
     for line in lines:
         parted  = line.split(' ')
         class_id = int(parted[0]) + 1
-        center_x, center_y, w, h = [float(v) * IMAGE_SIZE for v in parted[1:]]
+        center_x, center_y, w, h = [float(v) * ORIGINAL_IMAGE_SIZE for v in parted[1:]]
         data.append([
             # convert yolo to pascal voc
             center_x - w / 2,
@@ -86,14 +91,14 @@ def read_label(path):
 def label_to_str(label):
     lines = []
     for bbox in label:
-        x0, y0, x1, y1 = bbox[:4] / IMAGE_SIZE
-        c = bbox[4] - 1
+        x0, y0, x1, y1 = bbox[:4] / ORIGINAL_IMAGE_SIZE
+        cls_ = bbox[4] - 1
         x = (x1 - x0) / 2
         y = (y1 - y0) / 2
         w = x1 - x0
         h = y1 - y0
-        line = f'{c} {x:.6f} {y:.6f} {w:.6f} {y:.6f}'
-        lines.append([c, line])
+        line = f'{cls_} {x:.6f} {y:.6f} {w:.6f} {h:.6f}'
+        lines.append([cls_, line])
     lines = sorted(lines, key=lambda v:v[0])
     return '\n'.join([l[1] for l in lines])
 
@@ -135,52 +140,86 @@ def xyxy_to_xywh(bb, w, h):
     return bb
 
 
-class ROIDataset(Dataset):
-    def __init__(self, target='effdet', is_training=True, normalized=True, with_label=True):
-        adapter_table = {
-            'effdet': self.effdet_adapter,
-            'yolo': self.yolo_adapter,
-            'ssd': self.ssd_adapter,
-        }
-        if target not in list(adapter_table.keys()):
-            raise ValueError(f'Invalid target: {target}')
-        self.target = target
-        self.is_training = is_training
-        self.with_label = with_label
-        self.normalized = normalized
+class DefaultDetAdaper():
+    def __call__(self, images, bboxes, labels):
+        return images, bboxes, labels
 
-        self.adapter = adapter_table[target]
+class EffDetAdaper():
+    def __call__(self, images, bboxes, labels):
+        # from xyxy to yxyx
+        bboxes = bboxes[:, [1, 0, 3, 2]]
+        bboxes, labels = pad_targets(bboxes, labels, 6)
+
+        labels = {
+            'bbox': torch.FloatTensor(bboxes),
+            'cls': torch.FloatTensor(labels),
+        }
+        return images, labels
+
+class YOLOAdapter():
+    def __call__(self, images, bboxes, labels):
+        bboxes = xyxy_to_xywh(bboxes, w=images.shape[2], h=images.shape[1])
+        bboxes, labels = pad_targets(bboxes, labels, 6, fill=(0, -1))
+        batches = np.zeros([6, 1])
+        # yolo targets: [batch_idx, class_id, x, y, w, h]
+        labels = np.concatenate([batches, labels[:, None], bboxes], axis=1)
+        return images, torch.FloatTensor(labels)
+
+
+class SSDAdapter():
+    def __call__(self, images, bboxes, labels):
+        # bboxes = xyxy_to_xywh(bboxes, w=images.shape[2], h=images.shape[1])
+        if len(bboxes) > 0:
+            bboxes[:, [0, 2]] /= images.shape[2]
+            bboxes[:, [1, 3]] /= images.shape[1]
+        # bboxes = [b for b in bboxes]
+        # labels = [l for l in labels]
+        return images, (torch.from_numpy(bboxes), torch.from_numpy(labels))
+
+
+
+class ROIDataset(Dataset):
+    def __init__(self, target='train', mode='default', test_ratio=0.25, image_size=512, normalized=True, seed=42):
+        self.target = target
+        self.mode = mode
+        self.normalized = normalized
+        self.seed = seed
+        self.test_ratio = test_ratio
+
+        self.adapter = {
+            'default': DefaultDetAdaper(),
+            'effdet': EffDetAdaper(),
+            'yolo': YOLOAdapter(),
+            'ssd': SSDAdapter(),
+        }[mode]
         self.items = self.load_items()
-        self.apply_augs([])
+
         self.horizontal_filpper_index = None
 
-    def load_items(self):
-        if self.is_training:
-            base_dir = 'data/roi/train'
+        # mean, std = calc_mean_and_std([item.image for item in self.items])
+        print(mean, std)
+
+        if self.target == 'train':
+            augs = [
+                A.RandomResizedCrop(width=image_size, height=image_size, scale=[0.7, 1.0]),
+                A.HorizontalFlip(p=0.5),
+                A.GaussNoise(p=0.2),
+                A.OneOf([
+                    A.MotionBlur(p=.2),
+                    A.MedianBlur(blur_limit=3, p=0.1),
+                    A.Blur(blur_limit=3, p=0.1),
+                ], p=0.2),
+                A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.2, rotate_limit=5, p=0.5),
+                A.OneOf([
+                    A.CLAHE(clip_limit=2),
+                    A.Emboss(),
+                    A.RandomBrightnessContrast(),
+                ], p=0.3),
+                A.HueSaturationValue(p=0.3),
+            ]
         else:
-            base_dir = 'data/roi/test'
+            augs = []
 
-        items = []
-        image_paths = sorted(glob.glob(os.path.join(base_dir, 'image', '*.jpg')))
-        t = tqdm(image_paths, leave=False)
-        for image_path in t:
-            file_name = os.path.basename(image_path)
-            base_name = os.path.splitext(file_name)[0]
-            if self.with_label:
-                label_path = os.path.join(base_dir, 'label', f'{base_name}.txt')
-                bb_df = read_label(label_path)
-            else:
-                label_path = None
-                bb_df = pd.DataFrame()
-            image = Image.open(image_path)
-            items.append(XRBBItem(image, base_name, bb_df, image_path, label_path))
-            t.set_description(f'loaded {image_path}')
-            t.refresh()
-        print('All images loaded')
-        return items
-
-    def apply_augs(self, augs):
-        mean, std = calc_mean_and_std([item.image for item in self.items])
         self.albu = A.ReplayCompose([
             *augs,
             A.Normalize(*[[v] * 3 for v in [mean, std]]) if self.normalized else None,
@@ -193,7 +232,40 @@ class ROIDataset(Dataset):
                 self.horizontal_filpper_index = i
                 break
 
-    def validate(self):
+    def load_items_from_dir(self, di):
+        pass
+
+    def load_items(self):
+        base_dir = 'data/roi'
+        paths_all = sorted(glob(os.path.join(base_dir, 'image/*.jpg')))
+
+        paths_train, paths_test = train_test_split(
+            paths_all,
+            test_size=self.test_ratio,
+            random_state=self.seed)
+
+        paths = paths_all
+        if self.target == 'train':
+            paths = paths_train
+        elif self.target == 'test':
+            paths = paths_test
+
+        items = []
+        t = tqdm(paths, leave=False)
+        for image_path in t:
+            file_name = os.path.basename(image_path)
+            base_name = os.path.splitext(file_name)[0]
+
+            label_path = os.path.join(base_dir, f'label/{base_name}.txt')
+            bb_df = read_label_as_df(label_path)
+            image = Image.open(image_path)
+            items.append(XRBBItem(image, base_name, bb_df, image_path, label_path))
+            t.set_description(f'loaded {image_path}')
+            t.refresh()
+        print('All images loaded')
+        return items
+
+    def validate_id(self):
         for item in tqdm(self.items):
             m = np.all(item.bb['id'].values == np.array([1, 2, 3, 4, 5, 6]))
             if not m:
@@ -203,34 +275,6 @@ class ROIDataset(Dataset):
 
     def __len__(self):
         return len(self.items)
-
-    def effdet_adapter(self, images, bboxes, labels):
-        # use yxyx
-        bboxes = bboxes[:, [1, 0, 3, 2]]
-        bboxes, labels = pad_targets(bboxes, labels, 6)
-
-        labels = {
-            'bbox': torch.FloatTensor(bboxes),
-            'cls': torch.FloatTensor(labels),
-        }
-        return images, labels
-
-    def yolo_adapter(self, images, bboxes, labels):
-        bboxes = xyxy_to_xywh(bboxes, w=images.shape[2], h=images.shape[1])
-        bboxes, labels = pad_targets(bboxes, labels, 6, fill=(0, -1))
-        batches = np.zeros([6, 1])
-        # yolo targets: [batch_idx, class_id, x, y, w, h]
-        labels = np.concatenate([batches, labels[:, None], bboxes], axis=1)
-        return images, torch.FloatTensor(labels)
-
-    def ssd_adapter(self, images, bboxes, labels):
-        # bboxes = xyxy_to_xywh(bboxes, w=images.shape[2], h=images.shape[1])
-        if len(bboxes) > 0:
-            bboxes[:, [0, 2]] /= images.shape[2]
-            bboxes[:, [1, 3]] /= images.shape[1]
-        # bboxes = [b for b in bboxes]
-        # labels = [l for l in labels]
-        return images, (torch.from_numpy(bboxes), torch.from_numpy(labels))
 
     def __getitem__(self, idx):
         item = self.items[idx]
@@ -254,8 +298,8 @@ class ROIDataset(Dataset):
 
 
 class ROICroppedDataset(Dataset):
-    def __init__(self, image_size=(256, 128), *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, image_size=(256, 128), **kwargs):
+        super().__init__(**kwargs)
         full_df = pd.read_excel('data/table.xlsx')
         self.df = full_df[full_df['test'] == 0 if self.is_training else 1]
         self.image_size = image_size
@@ -265,9 +309,11 @@ class ROICroppedDataset(Dataset):
         item = self.items[idx]
         image = item.image
         vv = np.round(item.label.values[:, :4]).astype(np.int)
+        # top-left edge
         left, top = np.min(vv[:, [0, 1]], axis=0)
+        # bottom-right edge
         right, bottom = np.max(vv[:, [2, 3]], axis=0)
-        roi = image.crop((left, top, right, bottom))
+        x = image.crop((left, top, right, bottom))
         found = self.df[self.df['label'] == int(item.name)]
 
         y = int(found['treatment'].values[0])
@@ -278,42 +324,22 @@ class ROICroppedDataset(Dataset):
         return self.transform(x, y)
 
 
-def resplit():
-    train_ds = ROIDataset(is_training=True)
-    test_ds = ROIDataset(is_training=False)
+class C(Commander):
+    def arg_common(self, parser):
+        parser.add_argument('--target', '-t', default='all', choices=['all', 'train', 'test'])
+        parser.add_argument('--mode', '-m', default='default', choices=['default', 'effdet', 'yolo', 'ssd'])
 
-    train_ids = np.loadtxt('./data/train.tsv', delimiter='\t').astype(np.int64).tolist()
-    test_ids = np.loadtxt('./data/test.tsv', delimiter='\t').astype(np.int64).tolist()
+    def pre_common(self):
+        self.ds = ROIDataset(
+            target=self.args.target,
+            mode=self.args.mode,
+        )
 
-    items = train_ds.items + test_ds.items
-
-
-    dest_dir = 'data/roi_new'
-    for a in ['train', 'test']:
-        for b in ['image', 'label']:
-            os.makedirs(os.path.join(dest_dir, a, b), exist_ok=True)
-
-    for item in tqdm(items):
-        i = int(item.name)
-        if i in train_ids:
-            train_ids.pop(train_ids.index(i))
-            target = 'train'
-        elif i in test_ids:
-            test_ids.pop(test_ids.index(i))
-            target = 'test'
-        else:
-            print(f'missing: {i}')
-
-        label_name = os.path.basename(item.label_path)
-        image_name = os.path.basename(item.image_path)
-        shutil.copyfile(item.image_path, os.path.join(dest_dir, target, 'image', image_name))
-        shutil.copyfile(item.label_path, os.path.join(dest_dir, target, 'label', label_name))
-
-    print(train_ids)
-    print(test_ids)
+    def run_samples(self):
+        for item in tqdm(self.ds, total=len(self.ds)):
+            self.img, self.bb, self.label = item
+            return
 
 
-
-
-if __name__ == '__main__':
-    resplit()
+c = C()
+c.run()

@@ -17,8 +17,8 @@ def bbox_wh_iou(wh1, wh2):
 
 def parse_model_config(path):
     """Parses the yolo-v3 layer configuration file and returns module definitions"""
-    file = open(path, 'r')
-    lines = file.read().split('\n')
+    with open(path, 'r', encoding='utf-8') as f:
+        lines = f.read().split('\n')
     lines = [x for x in lines if x and not x.startswith('#')]
     lines = [x.rstrip().lstrip() for x in lines] # get rid of fringe whitespaces
     module_defs = []
