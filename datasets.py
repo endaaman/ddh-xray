@@ -23,9 +23,11 @@ from torchvision.utils import draw_bounding_boxes
 import albumentations as A
 from albumentations.pytorch.transforms import ToTensorV2
 
-from endaaman import Commander
 
-from utils import XrayBBItem, calc_mean_and_std, label_to_tensor, draw_bb, tensor_to_pil
+from endaaman import Commander
+from endaaman.torch import pil_to_tensor, tensor_to_pil
+
+from utils import XrayBBItem, calc_mean_and_std, label_to_tensor, draw_bb
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -197,7 +199,7 @@ class ROIDataset(Dataset):
         self.horizontal_filpper_index = None
 
         # mean, std = calc_mean_and_std([item.image for item in self.items])
-        print(mean, std)
+        # print(mean, std)
 
         if self.target == 'train':
             augs = [
@@ -222,7 +224,7 @@ class ROIDataset(Dataset):
 
         self.albu = A.ReplayCompose([
             *augs,
-            A.Normalize(*[[v] * 3 for v in [mean, std]]) if self.normalized else None,
+            A.Normalize(*[[v] * 3 for v in [IMAGE_MEAN, IMAGE_STD]]) if self.normalized else None,
             ToTensorV2(),
         ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']))
 
@@ -335,11 +337,16 @@ class C(Commander):
             mode=self.args.mode,
         )
 
-    def run_samples(self):
-        for item in tqdm(self.ds, total=len(self.ds)):
-            self.img, self.bb, self.label = item
-            return
+    def run_bbs(self):
+        dest = f'out/bbs_{self.ds.target}'
+        os.makedirs(dest, exist_ok=True)
+        for i, (img, bb, label) in tqdm(enumerate(self.ds), total=len(self.ds)):
+            # self.img, self.bb, self.label = item
+            img = tensor_to_pil(img)
+            ret = draw_bb(img, bb, {i:f'{l}' for i, l in enumerate(label) })
+            ret.save(f'{dest}/{i}.jpg')
 
 
-c = C()
-c.run()
+if __name__ == '__main__':
+    c = C()
+    c.run()

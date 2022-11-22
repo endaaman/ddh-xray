@@ -1,4 +1,5 @@
 import os
+import sys
 import io
 import json
 import yaml
@@ -14,7 +15,7 @@ import torch
 from torch import optim
 from torchvision import transforms
 from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 import albumentations as A
 from effdet import EfficientDet, DetBenchTrain, get_efficientdet_config
 from effdet.efficientdet import HeadNet
@@ -22,11 +23,12 @@ import yolov5
 from ptflops import get_model_complexity_info
 from yolov5.models.yolo import Model as Yolo5
 
+from endaaman.torch import Trainer
+
 from datasets import ROIDataset
 from utils import get_state_dict
 from models import YOLOv3, SSD300, Yolor, yolor_loss
 from models.ssd import MultiBoxLoss
-from endaaman import Commander
 
 
 SIZE_BY_DEPTH = {
@@ -41,158 +43,22 @@ SIZE_BY_DEPTH = {
 }
 
 
-class CNN(Commander):
+class T(Trainer):
     def arg_common(self, parser):
-        parser.add_argument('-e', '--epoch', type=int, default=50)
-        parser.add_argument('-b', '--batch-size', type=int, default=16)
-        parser.add_argument('--lr', type=float, default=0.01)
-        parser.add_argument('--workers', type=int, default=os.cpu_count()//2)
-        parser.add_argument('--no-aug', action='store_true')
-        parser.add_argument('--no-skip-first', action='store_true')
-        parser.add_argument('-p', '--period-save-weight', type=int, default=10)
-        parser.add_argument('-n', '--no-show-fig', action='store_true')
+        pass
+        # parser.add_argument('--no-aug', action='store_true')
 
-    def pre_common(self):
-        self.sub_name = ''
-
-    def train_model(self, model, loaders, eval_fn, additional_metrics={}, save_hook=None):
-        assert self.sub_name
-        assert self.model_name
-        full_name = self.model_name + '_' + self.sub_name if self.sub_name else self.model_name
-        matplotlib.use('Agg')
-        train_loader = loaders.get('train')
-        val_loader = loaders.get('val')
-        optimizer = optim.Adam(model.parameters(), lr=self.args.lr)
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3)
-        print('Starting training')
-        train_history = {'loss':[], **{k:[] for k in additional_metrics.keys()}}
-        val_history = {'loss':[], **{k:[] for k in additional_metrics.keys()}}
-        writer = SummaryWriter(log_dir='log/', filename_suffix=full_name)
-        for epoch in range(1, self.args.epoch + 1):
-            header = f'[{epoch}/{self.args.epoch}] '
-
-            lr = optimizer.param_groups[0]['lr']
-            now = datetime.datetime.now().strftime('%H:%M:%S')
-            print(f'{header}starting lr={lr:.7f} ({now})')
-
-            train_metrics = {'loss':[], **{k:[] for k in additional_metrics.keys()}}
-            val_metrics = {'loss':[], **{k:[] for k in additional_metrics.keys()}}
-
-            train_start_time = time.perf_counter()
-            t = tqdm(train_loader, leave=False)
-            for (inputs, labels) in t:
-                optimizer.zero_grad()
-                loss, outputs = eval_fn(inputs, labels)
-                loss.backward()
-                optimizer.step()
-                train_metrics['loss'].append(float(loss.item()))
-                # outputs = outputs.cpu().detach()
-                for k, metrics_fn in additional_metrics.items():
-                    v = metrics_fn(outputs, labels)
-                    train_metrics[k].append(v)
-                message = ' '.join([f'{k}:{v[-1]:.4f}' for k, v in train_metrics.items()])
-                t.set_description(f'{header}{message}')
-                t.refresh()
-            for k, v in train_metrics.items():
-                train_history[k].append(np.mean(v))
-            train_message = ' '.join([f'{k}:{v[-1]:.4f}' for k, v in train_history.items()])
-            train_duration = str(datetime.timedelta(seconds=int(time.perf_counter() - train_start_time)))
-            print(f'{header}train: {train_message} ({train_duration})')
-
-            #* validate
-            if val_loader:
-                model.eval()
-                with torch.set_grad_enabled(False):
-                    for i, (inputs, labels) in enumerate(val_loader):
-                        loss, outputs = eval_fn(inputs, labels)
-                        # outputs = outputs.cpu().detach()
-                        val_metrics['loss'].append(float(loss.item()))
-                        for k, metrics_fn in additional_metrics.items():
-                            val_metrics[k].append(metrics_fn(outputs, labels))
-                model.train()
-                for k, v in val_metrics.items():
-                    val_history[k].append(np.mean(v))
-                val_message = ' '.join([f'{k}:{v[-1]:.4f}' for k, v in val_history.items()])
-                print(f'{header}val: {val_message}')
-
-            #* draw fig
-            if epoch > 1:
-                fisrt_idx = 0 if self.args.no_skip_first else 1
-                x_axis = np.arange(1, epoch+1)[fisrt_idx:]
-                fig = plt.figure(figsize=(10, 5))
-                for i, (k, train_values) in enumerate(train_history.items()):
-                    ax = fig.add_subplot(1, len(train_history.keys()), i+1)
-                    ax.get_xaxis().set_major_locator(ticker.MaxNLocator(integer=True))
-                    ax.set_title(k)
-                    ax.plot(x_axis, train_values[fisrt_idx:], label=f'train')
-                    if val_loader:
-                        val_values = val_history[k]
-                        ax.plot(x_axis, val_values[fisrt_idx:], label=f'val')
-                    ax.legend()
-                fig_path = f'tmp/training_curve_{full_name}.png'
-                plt.savefig(fig_path)
-
-                if epoch == 2 and not self.args.no_show_fig:
-                    os.system(f'xdg-open {fig_path} > /dev/null')
-                fig.clf()
-                plt.clf()
-                plt.close()
-
-            for (tag, metrics) in (('train', train_history), ('val', val_history)):
-                for k, v in metrics.items():
-                    if len(v) > 0:
-                        writer.add_scalar(f'{k}/{tag}', v[-1], epoch-1)
-
-            #* save weights
-            if epoch % self.args.period_save_weight == 0:
-                weights_path = self.save_weights(model, epoch, train_history, val_history, save_hook)
-                print(f'{header}Saved "{weights_path}"')
-
-            scheduler.step(train_metrics['loss'][-1])
-            # scheduler.step()
-            print()
-
-    def save_weights(self, model, epoch, train_history, val_history, save_hook=None):
-        weights_dir = f'weights/{self.model_name}'
-        if self.sub_name and (self.sub_name != self.model_name):
-            weights_dir = os.path.join(weights_dir, self.sub_name)
-
-        if self.args.suffix:
-            weights_dir += '_' + self.args.suffix
-        os.makedirs(weights_dir, exist_ok=True)
-
-        weights_name = f'{epoch}.pth'
-        weights = {
-            'model_name': self.model_name,
-            'sub_name': self.sub_name,
-            'suffix': self.args.suffix,
-            'epoch': epoch,
-            'args': self.args,
-            'state_dict': get_state_dict(model),
-            'train_history': train_history,
-            'val_history': val_history,
-        }
-
-        if callable(save_hook):
-            weights_dir, weights_name, weights = save_hook(weights_dir, weights_name, weights)
-
-        weights_path = os.path.join(weights_dir, weights_name)
-        torch.save(weights, weights_path)
-        return weights_path
-
-    def create_model(self, model_name=None):
-        if not model_name:
-            model_name = self.model_name
-
+    def create_model(self, model_name, sub_name=None):
         if model_name == 'yolo':
             model = YOLOv3()
         elif model_name == 'yolor':
             model = Yolor(num_classes=7)
         elif model_name == 'yolo5':
             # model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
-             model = Yolo5(cfg='cfg/yolov5s.yaml')
+            model = Yolo5(cfg='cfg/yolov5s.yaml')
         elif model_name == 'effdet':
-            cfg = get_efficientdet_config(f'tf_efficientdet_{self.sub_name}')
+            assert sub_name
+            cfg = get_efficientdet_config(f'tf_efficientdet_{sub_name}')
             cfg.num_classes = 6
             model = EfficientDet(cfg)
         elif model_name == 'ssd':
@@ -202,50 +68,25 @@ class CNN(Commander):
 
         return model.to(self.device).train()
 
-    def create_loaders(self, target, image_size, collate_fn=None):
-        if target not in ['effdet', 'yolo', 'ssd']:
-            raise ValueError(f'Invalid target: {target}')
-        train_dataset = ROIDataset(target=target, is_training=True)
+    def create_loaders(self, mode, image_size, collate_fn=None):
+        if mode not in ['effdet', 'yolo', 'ssd']:
+            raise ValueError(f'Invalid target: {mode}')
 
-        if not self.args.no_aug:
-            train_dataset.apply_augs([
-                A.RandomResizedCrop(width=image_size, height=image_size, scale=[0.7, 1.0]),
-                A.HorizontalFlip(p=0.5),
-                A.GaussNoise(p=0.2),
-                A.OneOf([
-                    A.MotionBlur(p=.2),
-                    A.MedianBlur(blur_limit=3, p=0.1),
-                    A.Blur(blur_limit=3, p=0.1),
-                ], p=0.2),
-                A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.2, rotate_limit=5, p=0.5),
-                A.OneOf([
-                    A.CLAHE(clip_limit=2),
-                    A.Emboss(),
-                    A.RandomBrightnessContrast(),
-                ], p=0.3),
-                A.HueSaturationValue(p=0.3),
-            ])
-
-        train_loader = DataLoader(
-            train_dataset,
-            batch_size=self.args.batch_size,
-            num_workers=self.args.workers,
-            collate_fn=collate_fn
-        )
-        return {
-            'train': train_loader,
-        }
+        loaders = [
+            self.as_loader(
+                ROIDataset(mode=mode, target=target),
+                collate_fn=collate_fn
+            ) for target in ['train', 'test']
+        ]
+        return loaders
 
 
     def arg_effdet(self, parser):
         parser.add_argument('-d', '--depth', default='d0', choices=list(SIZE_BY_DEPTH.keys()))
 
-    def pre_effdet(self):
-        self.model_name = 'effdet'
-        self.sub_name = self.args.depth
-
     def run_effdet(self):
-        model = self.create_model()
+        depth = self.args.depth
+        model = self.create_model('effdet', depth)
         bench = DetBenchTrain(model).to(self.device)
         loaders = self.create_loaders('effdet', SIZE_BY_DEPTH[self.args.depth])
 
@@ -257,17 +98,16 @@ class CNN(Commander):
             return loss['loss'], None
 
         self.train_model(
-            model,
-            loaders,
-            eval_fn, {
-                # metrics_fn
-            })
-
-    def pre_yolo(self):
-        self.model_name = self.sub_name = 'yolo'
+            name=f'effdet_{depth}',
+            model=model,
+            train_loader=loaders[0],
+            val_loader=loaders[0],
+            eval_fn=eval_fn,
+            no_metrics=True,
+        )
 
     def run_yolo(self):
-        model = self.create_model()
+        model = self.create_model('yolo')
         loaders = self.create_loaders('yolo', 512)
 
         def eval_fn(inputs, labels):
@@ -284,20 +124,17 @@ class CNN(Commander):
             weights['darknet_weight'] = name
             return weights_dir, weights_name, weights
 
-        self.train_model(
-            model,
-            loaders,
-            eval_fn, {
-                # metrics_fn
-            },
-            # save_hook
-        )
-
-    def pre_yolor(self):
-        self.model_name = self.sub_name = 'yolor'
+        # self.train_model(
+        #     model,
+        #     loaders,
+        #     eval_fn, {
+        #         # metrics_fn
+        #     },
+        #     # save_hook
+        # )
 
     def run_yolor(self):
-        model = self.create_model()
+        model = self.create_model('yolor')
         loaders = self.create_loaders('yolo', 512)
 
         def eval_fn(inputs, labels):
@@ -309,16 +146,13 @@ class CNN(Commander):
             loss = yolor_loss(outputs, labels, model)
             return loss[0], outputs
 
-        self.train_model(
-            model,
-            loaders,
-            eval_fn, {
-                # metrics_fn
-            },
-        )
-
-    def pre_ssd(self):
-        self.model_name = self.sub_name = 'ssd'
+        # self.train_model(
+        #     model,
+        #     loaders,
+        #     eval_fn, {
+        #         # metrics_fn
+        #     },
+        # )
 
     def run_ssd(self):
         def collate_fn(batch):
@@ -329,7 +163,7 @@ class CNN(Commander):
                 yy.append(y)
             return torch.stack(xx), yy
 
-        model = self.create_model()
+        model = self.create_model('ssd')
         loaders = self.create_loaders('ssd', 300, collate_fn)
         criterion = MultiBoxLoss(priors_cxcy=model.priors_cxcy)
 
@@ -352,25 +186,22 @@ class CNN(Commander):
                         vvv.append([a.to('cpu') for a in v])
                 torch.save([*vv, loss.item()], 'tmp/loss.pth')
                 print(loss.item())
-                exit(0)
+                sys.exit(0)
             return loss, None
 
-        self.train_model(
-            model,
-            loaders,
-            eval_fn, {
-                # metrics_fn
-            })
+        # self.train_model(
+        #     model,
+        #     loaders,
+        #     eval_fn, {
+        #         # metrics_fn
+        #     })
 
     def arg_fake(self, parser):
         parser.add_argument('-m', '--model-name', required=True)
         parser.add_argument('-d', '--depth', default='d0', choices=list(SIZE_BY_DEPTH.keys()))
 
     def run_fake(self):
-        self.model_name = self.sub_name = self.args.model_name
-        if self.model_name == 'effdet':
-            self.sub_name = self.args.depth
-        model = self.create_model()
+        model = self.create_model('effdet', self.args.depth)
         weights_path = self.save_weights(model, 0, {}, {})
         print(weights_path)
 
@@ -406,5 +237,10 @@ class CNN(Commander):
 
 
 
-c = CNN()
-c.run()
+if __name__ == '__main__':
+    t = T({
+        'epoch': 100,
+        'lr': 0.001,
+        'batch_size': 32,
+    })
+    t.run()
