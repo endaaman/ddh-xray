@@ -264,7 +264,7 @@ class ROIDataset(Dataset):
             items.append(XRBBItem(image, base_name, bb_df, image_path, label_path))
             t.set_description(f'loaded {image_path}')
             t.refresh()
-        print('All images loaded')
+        print(f'{self.target} images loaded')
         return items
 
     def validate_id(self):
