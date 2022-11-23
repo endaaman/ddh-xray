@@ -240,7 +240,7 @@ class T(Trainer):
 if __name__ == '__main__':
     t = T({
         'epoch': 100,
-        'lr': 0.001,
+        'lr': 0.0001,
         'batch_size': 32,
     })
     t.run()
