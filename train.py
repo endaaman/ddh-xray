@@ -74,7 +74,7 @@ class T(Trainer):
 
         loaders = [
             self.as_loader(
-                ROIDataset(mode=mode, target=target),
+                ROIDataset(mode=mode, target=target, image_size=image_size),
                 collate_fn=collate_fn
             ) for target in ['train', 'test']
         ]

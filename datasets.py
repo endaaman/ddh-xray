@@ -234,9 +234,6 @@ class ROIDataset(Dataset):
                 self.horizontal_filpper_index = i
                 break
 
-    def load_items_from_dir(self, di):
-        pass
-
     def load_items(self):
         base_dir = 'data/roi'
         paths_all = sorted(glob(os.path.join(base_dir, 'image/*.jpg')))
