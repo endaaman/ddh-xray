@@ -8,7 +8,7 @@ import pandas as pd
 from matplotlib import pyplot as plt
 import matplotlib.patheffects as path_effects
 from sklearn import metrics
-from adjustText import adjust_text
+from adjusttext import adjust_text
 
 from endaaman import Commander
 

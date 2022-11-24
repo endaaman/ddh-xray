@@ -2,10 +2,10 @@ import os
 import sys
 import io
 import json
-import yaml
 import time
 import datetime
 
+import yaml
 from PIL import Image, ImageDraw
 from tqdm import tqdm
 import numpy as np
@@ -55,7 +55,7 @@ class T(Trainer):
             cfg.num_classes = 6
             model = EfficientDet(cfg)
 
-        elif model_name == 'yolo':
+        elif model_name == 'yolo_v3':
             model = YOLOv3()
 
         elif model_name == 'yolor':
@@ -105,14 +105,13 @@ class T(Trainer):
         self.train_model(
             name=f'effdet_{depth}',
             model=model,
-            train_loader=loaders[0],
-            val_loader=loaders[0],
+            loaders=loaders,
             eval_fn=eval_fn,
             no_metrics=True,
         )
 
-    def run_yolo(self):
-        model = self.create_model('yolo')
+    def run_yolo_v3(self):
+        model = self.create_model('yolo_v3')
         loaders = self.create_loaders('yolo', 512)
 
         def eval_fn(inputs, labels):
@@ -123,20 +122,17 @@ class T(Trainer):
             loss, outputs = model(inputs, labels)
             return loss, outputs
 
-        def save_hook(weights_dir, weights_name, weights):
-            name = weights['epoch'] + '.darknet'
-            model.save_darknet_weights(os.path.join(weights_dir, name))
-            weights['darknet_weight'] = name
-            return weights_dir, weights_name, weights
+        def state_dict_fn(model):
+            return model.get_weight()
 
-        # self.train_model(
-        #     model,
-        #     loaders,
-        #     eval_fn, {
-        #         # metrics_fn
-        #     },
-        #     # save_hook
-        # )
+        self.train_model(
+            name='yolo_v3',
+            model=model,
+            loaders=loaders,
+            eval_fn=eval_fn,
+            no_metrics=True,
+            state_dict_fn=state_dict_fn,
+        )
 
     def run_yolor(self):
         model = self.create_model('yolor')

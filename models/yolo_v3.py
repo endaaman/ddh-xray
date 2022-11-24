@@ -1,5 +1,7 @@
 from __future__ import division
 
+import os
+
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -459,12 +461,14 @@ class YOLOv3(nn.Module):
             @:param path    - path of the new weights file
             @:param cutoff  - save layers between 0 and cutoff (cutoff = -1 -> all are saved)
         """
+        #pylint: disable=consider-using-with
         fp = open(path, "wb")
+
         self.header_info[3] = self.seen
         self.header_info.tofile(fp)
 
         # Iterate through layers
-        for i, (module_def, module) in enumerate(zip(self.module_defs[:cutoff], self.module_list[:cutoff])):
+        for module_def, module in zip(self.module_defs[:cutoff], self.module_list[:cutoff]):
             if module_def["type"] == "convolutional":
                 conv_layer = module[0]
                 # If batch norm, load bn first
@@ -481,6 +485,23 @@ class YOLOv3(nn.Module):
                 conv_layer.weight.data.cpu().numpy().tofile(fp)
 
         fp.close()
+
+    CACHE_PATH = '/tmp/darknet.weight'
+
+    def get_weight(self):
+        self.save_darknet_weights(self.CACHE_PATH)
+        buf = None
+        with open(self.CACHE_PATH, 'r+b') as fp:
+            buf = fp.read()
+        os.remove(self.CACHE_PATH)
+        return buf
+
+    def load_weight(self, buf):
+        buf = None
+        with open(self.CACHE_PATH, 'wb') as fp:
+            fp.write(buf)
+        self.load_darknet_weights(self.CACHE_PATH)
+        os.remove(self.CACHE_PATH)
 
 
 def xywh2xyxy(x):
@@ -549,10 +570,10 @@ def rescale_boxes(boxes, current_dim, original_shape):
 
 
 if __name__ == '__main__':
-    t = torch.randn(1, 3, 224, 224).float()
+    t = torch.randn(1, 3, 512, 512).float()
     m = YOLOv3()
     bb =torch.tensor([
-        [1, 0, 0, 0, 0.5, 0.4],
+        [0, 0, 0, 0, 0.5, 0.4],
     ])
     print(bb.size())
     (loss, y) = m(t, bb)
