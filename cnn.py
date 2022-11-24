@@ -19,9 +19,9 @@ from torch.utils.data import DataLoader
 import albumentations as A
 from effdet import EfficientDet, DetBenchTrain, get_efficientdet_config
 from effdet.efficientdet import HeadNet
-import yolov5
 from ptflops import get_model_complexity_info
-from yolov5.models.yolo import Model as Yolo5
+# import yolov5
+# from yolov5.models.yolo import Model as Yolo5
 
 from endaaman.torch import Trainer
 
@@ -49,20 +49,25 @@ class T(Trainer):
         # parser.add_argument('--no-aug', action='store_true')
 
     def create_model(self, model_name, sub_name=None):
-        if model_name == 'yolo':
-            model = YOLOv3()
-        elif model_name == 'yolor':
-            model = Yolor(num_classes=7)
-        elif model_name == 'yolo5':
-            # model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
-            model = Yolo5(cfg='cfg/yolov5s.yaml')
-        elif model_name == 'effdet':
+        if model_name == 'effdet':
             assert sub_name
             cfg = get_efficientdet_config(f'tf_efficientdet_{sub_name}')
             cfg.num_classes = 6
             model = EfficientDet(cfg)
+
+        elif model_name == 'yolo':
+            model = YOLOv3()
+
+        elif model_name == 'yolor':
+            model = Yolor(num_classes=7)
+
+        # elif model_name == 'yolo5':
+        #     # model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
+        #     model = Yolo5(cfg='cfg/yolov5s.yaml')
+
         elif model_name == 'ssd':
             model = SSD300(n_classes=7)
+
         else:
             raise ValueError(f'Ivalid model_name: {model_name}')
 

@@ -7,7 +7,6 @@ import numpy as np
 import pandas as pd
 from torchvision import transforms
 from torchvision.utils import draw_bounding_boxes
-from recordclass import recordclass, RecordClass
 
 
 

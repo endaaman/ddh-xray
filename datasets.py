@@ -11,7 +11,6 @@ from collections import namedtuple, Counter
 
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from recordclass import recordclass, RecordClass
 from tqdm import tqdm
 import numpy as np
 from PIL import Image, ImageFilter, ImageOps, ImageFile
