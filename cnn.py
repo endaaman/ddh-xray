@@ -144,16 +144,18 @@ class T(Trainer):
             inputs = inputs.to(self.device)
             labels = labels.view(-1, 6).to(self.device) # batch x [batch_idx, cls_id, x, y, w, h]
             outputs = model(inputs)
+            print(len(outputs))
+            print(outputs[0].shape)
             loss = yolor_loss(outputs, labels, model)
             return loss[0], outputs
 
-        # self.train_model(
-        #     model,
-        #     loaders,
-        #     eval_fn, {
-        #         # metrics_fn
-        #     },
-        # )
+        self.train_model(
+            name='yolor',
+            model=model,
+            loaders=loaders,
+            eval_fn=eval_fn,
+            no_metrics=True,
+        )
 
     def run_ssd(self):
         def collate_fn(batch):

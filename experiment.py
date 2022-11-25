@@ -8,7 +8,7 @@ import pandas as pd
 from matplotlib import pyplot as plt
 import matplotlib.patheffects as path_effects
 from sklearn import metrics
-from adjusttext import adjust_text
+from adjustText import adjust_text
 
 from endaaman import Commander
 
@@ -34,7 +34,7 @@ class Experiment(Commander):
     def pre_common(self):
         pass
 
-    def arg_models(self, parser):
+    def arg_comb(self, parser):
         parser.add_argument('-e', '--seed', type=int, default=34)
 
     def run_comb(self):
@@ -45,7 +45,7 @@ class Experiment(Commander):
                 params = ' '.join([str(i) for i in mm])
                 suffix = '_'.join([str(i) for i in mm])
                 # python table.py train -m gbm --no-show-roc
-                command = f'python table.py train --no-show-fig -m {params} --suffix exp_{suffix} --seed {self.args.seed}'
+                command = f'python table.py train --no-show-fig -m {params} --suffix _exp_{suffix} --seed {self.args.seed}'
                 print(f'RUN: {command}')
                 cp = subprocess.run(command, shell=True)
                 print(cp)

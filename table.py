@@ -18,7 +18,7 @@ from sklearn.model_selection import StratifiedKFold, KFold, train_test_split
 from sklearn.linear_model import LogisticRegression, LinearRegression
 import optuna
 
-from endaaman import Commander, Timer
+from endaaman.torch import MLCommander
 
 from bench import LightGBMBench, XGBBench, SVMBench, NNBench
 from datasets import cols_cat, col_target, cols_feature, cols_extend, col_to_label
@@ -41,20 +41,14 @@ def fill_by_opposite(df):
                 df[f'left_{v}'][i] = df[f'right_{v}'][i]
                 # print(f'fill: [{i}] left {v}')
 
-class Table(Commander):
+class Table(MLCommander):
     def arg_common(self, parser):
         parser.add_argument('-r', '--test-ratio', type=float)
-        # parser.add_argument('--seed', type=int, default=34)
         parser.add_argument('-o', '--optuna', action='store_true')
         parser.add_argument('--aug-flip', action='store_true')
         parser.add_argument('--aug-fill', action='store_true')
 
     def pre_common(self):
-        # np.random.seed(self.args.seed)
-        # random.seed(self.args.seed)
-        # torch.manual_seed(self.args.seed)
-        # torch.cuda.manual_seed(self.args.seed)
-
         df_table = pd.read_excel('data/table.xlsx', index_col=0)
         df_measure_train = pd.read_excel('data/measurement_train.xlsx', index_col=0)
         df_measure_test = pd.read_excel('data/measurement_test.xlsx', index_col=0)
@@ -80,7 +74,11 @@ class Table(Commander):
             self.df_all[col] = fn(self.df_all)
 
         if self.args.test_ratio:
-            self.df_train, self.df_test = train_test_split(self.df_all, test_size=self.args.test_ratio, random_state=self.args.seed)
+            self.df_train, self.df_test = train_test_split(
+                self.df_all,
+                test_size=self.args.test_ratio,
+                random_state=self.args.seed,
+                stratify=self.df_all['treatment'])
         else:
             self.df_train = self.df_all[self.df_org['test'] == 0]
             self.df_test = self.df_all[self.df_org['test'] == 1]
@@ -151,8 +149,7 @@ class Table(Commander):
     def predict_benchs(self, benchs, x):
         if self.args.mean_by_bench:
             return np.stack([np.mean(b.predict(x), axis=1) for b in benchs], axis=1)
-        else:
-            return np.concatenate([b.predict(x) for b in benchs], axis=1)
+        return np.concatenate([b.predict(x) for b in benchs], axis=1)
 
     def run_train(self):
         benchs = self.create_benchs_by_args(self.args)
@@ -160,13 +157,13 @@ class Table(Commander):
         for b in benchs:
             b.train(self.df_train, col_target)
 
-        # p = f'out/model{self.get_suffix()}.txt'
+        # p = f'out/model{self.self.args.suffix}.txt'
         # model.save_model(p)
         checkpoint = {
             'args': self.args,
             'model_data': [b.serialize() for b in benchs],
         }
-        p = f'out/model{self.get_suffix()}.pth'
+        p = f'out/model{self.args.suffix}.pth'
         torch.save(checkpoint, p)
         print(f'wrote {p}')
 
@@ -263,7 +260,7 @@ class Table(Commander):
         if show_fig:
             plt.show()
 
-        plt.savefig(f'out/roc{self.get_suffix()}.png')
+        plt.savefig(f'out/roc{self.args.suffix}.png')
         plt.close()
 
         # targets = ['test', 'ind', 'manual']
@@ -296,11 +293,11 @@ class Table(Commander):
 
         # plt.subplots_adjust(left=0.125, bottom=0.1, right=0.9, top=0.9, wspace=0.2, hspace=0.2)
         # plt.tight_layout()
-        plt.savefig(f'out/cm{self.get_suffix()}.png')
+        plt.savefig(f'out/cm{self.args.suffix}.png')
         if show_fig:
             plt.show()
 
-        output_path = f'out/output{self.get_suffix()}.pt'
+        output_path = f'out/output{self.args.suffix}.pt'
         torch.save(output, output_path)
         print(f'wrote output to {output_path}')
 
@@ -310,7 +307,7 @@ class Table(Commander):
     def run_roc(self):
         checkpoint = torch.load(self.args.checkpoint)
         train_args = checkpoint['args']
-        bench = self.create_bench_by_args(args)
+        bench = self.create_bench_by_args(self.args)
         bench.restore(checkpoint['model_data'])
         self.evaluate(bench, True)
 
@@ -390,5 +387,5 @@ class Table(Commander):
         ax.set_title(f'Sens: {sens:.2f} Spec: {spec:.2f}')
         plt.show()
 
-t = Table()
-t.run()
+runner = Table()
+runner.run()

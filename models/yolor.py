@@ -535,7 +535,7 @@ class Yolor(nn.Module):
         self.nc = num_classes
         self.module_defs = parse_model_cfg(cfg)
         self.module_list, self.routs = create_modules(self.module_defs, img_size, cfg)
-        self.yolo_layers = get_yolo_layers(self)
+        self.yolo_layers = self.get_yolo_layers()
         # torch_utils.initialize_weights(self)
 
         # Darknet Header https://github.com/AlexeyAB/darknet/issues/2914#issuecomment-496675346
@@ -662,9 +662,8 @@ class Yolor(nn.Module):
     def info(self, verbose=False):
         model_info(self, verbose)
 
-
-def get_yolo_layers(model):
-    return [i for i, m in enumerate(model.module_list) if m.__class__.__name__ in ['YOLOLayer', 'JDELayer']]  # [89, 101, 113]
+    def get_yolo_layers(self):
+        return [i for i, m in enumerate(self.module_list) if m.__class__.__name__ in ['YOLOLayer', 'JDELayer']]  # [89, 101, 113]
 
 
 def load_darknet_weights(self, weights, cutoff=-1):
@@ -911,6 +910,8 @@ def build_targets(p, targets, model):
     for i, jj in enumerate(model.module.yolo_layers if multi_gpu else model.yolo_layers):
         # get number of grid points and anchor vec for this yolo layer
         anchors = model.module.module_list[jj].anchor_vec if multi_gpu else model.module_list[jj].anchor_vec
+        print(anchors)
+        print(anchors.shape)
         gain[2:] = torch.tensor(p[i].shape)[[3, 2, 3, 2]]  # xyxy gain
 
         # Match targets to anchors
