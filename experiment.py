@@ -34,10 +34,10 @@ class Experiment(Commander):
     def pre_common(self):
         pass
 
-    def arg_comb(self, parser):
-        parser.add_argument('-e', '--seed', type=int, default=34)
+    def arg_combination(self, parser):
+        parser.add_argument('-e', '--seed', type=int, default=42)
 
-    def run_comb(self):
+    def run_combination(self):
         models = ['gbm', 'nn', 'svm']
         for c in range(1, 4):
             for ii in list(combinations(range(0, 3), c)):
@@ -45,14 +45,14 @@ class Experiment(Commander):
                 params = ' '.join([str(i) for i in mm])
                 suffix = '_'.join([str(i) for i in mm])
                 # python table.py train -m gbm --no-show-roc
-                command = f'python table.py train --no-show-fig -m {params} --suffix _exp_{suffix} --seed {self.args.seed}'
+                command = f'python table.py train --no-show-fig -m {params} --suffix _exp_{suffix} --seed {self.args.seed} -r 0.3'
                 print(f'RUN: {command}')
-                cp = subprocess.run(command, shell=True)
+                cp = subprocess.run(command, shell=True, check=True)
                 print(cp)
 
         print('done.')
 
-    def run_compare_comb(self):
+    def run_compare_combination(self):
         code_names = ['gbm', 'nn', 'svm']
         names = ['LightGBM', 'NN', 'SVM']
         codes = OrderedDict()

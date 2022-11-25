@@ -21,7 +21,7 @@ import optuna
 from endaaman.torch import MLCommander
 
 from bench import LightGBMBench, XGBBench, SVMBench, NNBench
-from datasets import cols_cat, col_target, cols_feature, cols_extend, col_to_label
+from datasets.table import cols_cat, col_target, cols_feature, cols_extend, col_to_label
 
 
 optuna.logging.disable_default_handler()
@@ -45,65 +45,62 @@ class Table(MLCommander):
     def arg_common(self, parser):
         parser.add_argument('-r', '--test-ratio', type=float)
         parser.add_argument('-o', '--optuna', action='store_true')
-        parser.add_argument('--aug-flip', action='store_true')
-        parser.add_argument('--aug-fill', action='store_true')
+        parser.add_argument('--dropna', action='store_true')
+        parser.add_argument('--a-flip', action='store_true')
+        parser.add_argument('--a-fill', action='store_true')
 
     def pre_common(self):
-        df_table = pd.read_excel('data/table.xlsx', index_col=0)
-        df_measure_train = pd.read_excel('data/measurement_train.xlsx', index_col=0)
-        df_measure_test = pd.read_excel('data/measurement_test.xlsx', index_col=0)
+        df_table = pd.read_excel('data/table.xlsx', index_col=0) #len:765
+        df_measure = pd.read_excel('data/measurement_all.xlsx', index_col=0) #len:763
 
-        df_table.loc[df_table.index.isin(df_measure_train.index), 'test'] = 0
-        df_table.loc[df_table.index.isin(df_measure_test.index), 'test'] = 1
-        df_train = df_table[df_table['test'] == 0]
-        df_test = df_table[df_table['test'] == 1]
+        df_all = df_table.merge(df_measure,left_index=True, right_index=True, how='outer')
 
-        # df_train = df[df.index.isin(df_measure_train.index)]
-        # df_train.loc['test'] = 0
-        # df_test = df[df.index.isin(df_measure_test.index)]
-        # df_test['test'] = 1
+        if self.args.dropna:
+            df_all = df_all.dropna()
 
-        df_train = pd.concat([df_train, df_measure_train], axis=1)
-        df_test = pd.concat([df_test, df_measure_test], axis=1)
-
-        self.df_org = pd.concat([df_train, df_test])
-        self.df_all = self.df_org[cols_feature + [col_target]]
-        # self.df_all.loc[:, cols_cat]= self.df_all[cols_cat].astype('category')
-
-        for col, fn in cols_extend.items():
-            self.df_all[col] = fn(self.df_all)
+        # for col, fn in cols_extend.items():
+        #     print(col, fn)
+        #     df_all[col] = fn(df_all)
 
         if self.args.test_ratio:
-            self.df_train, self.df_test = train_test_split(
-                self.df_all,
+            df_train, df_test = train_test_split(
+                df_all,
                 test_size=self.args.test_ratio,
                 random_state=self.args.seed,
-                stratify=self.df_all['treatment'])
+                stratify=df_all['treatment'])
+
+            df_train['test'] = 0
+            df_test['test'] = 1
         else:
-            self.df_train = self.df_all[self.df_org['test'] == 0]
-            self.df_test = self.df_all[self.df_org['test'] == 1]
+            df_train = df_all[df_all['test'] == 0]
+            df_test = df_all[df_all['test'] == 1]
+
 
         df_table_ind = pd.read_excel('data/table_independent.xlsx', index_col=0)
         df_measure_ind = pd.read_excel('data/measurement_independent.xlsx', index_col=0)
         df_ind = pd.concat([df_table_ind, df_measure_ind], axis=1)
-        self.df_ind = df_ind[cols_feature + [col_target]]
 
         df_manual = pd.read_excel('data/manual_ind.xlsx', index_col=0)
-        self.df_manual = df_manual[cols_feature + [col_target]]
 
-        if self.args.aug_fill:
-            fill_by_opposite(self.df_train)
-            fill_by_opposite(self.df_test)
-            fill_by_opposite(self.df_ind)
+        if self.args.a_fill:
+            fill_by_opposite(df_train)
+            fill_by_opposite(df_test)
+            fill_by_opposite(df_ind)
 
-        if self.args.aug_flip:
-            df_train_mirror = self.df_train.copy()
-            df_train_mirror[['left_a', 'right_a']] = self.df_train[['right_a', 'left_a']]
-            df_train_mirror[['left_b', 'right_b']] = self.df_train[['right_b', 'left_b']]
-            df_train_mirror[['left_oe', 'right_oe']] = self.df_train[['right_oe', 'left_oe']]
-            df_train_mirror[['left_alpha', 'right_alpha']] = self.df_train[['right_alpha', 'left_alpha']]
-            print(df_train_mirror)
-            self.df_train = pd.concat([self.df_train, df_train_mirror])
+        if self.args.a_flip:
+            df_train_mirror = df_train.copy()
+            df_train_mirror[['left_a', 'right_a']] = df_train[['right_a', 'left_a']]
+            df_train_mirror[['left_b', 'right_b']] = df_train[['right_b', 'left_b']]
+            df_train_mirror[['left_oe', 'right_oe']] = df_train[['right_oe', 'left_oe']]
+            df_train_mirror[['left_alpha', 'right_alpha']] = df_train[['right_alpha', 'left_alpha']]
+            df_train = pd.concat([df_train, df_train_mirror])
+
+        t = cols_feature + [col_target]
+        self.df_all = df_all[t]
+        self.df_train = df_train[t]
+        self.df_test = df_test[t]
+        self.df_manual = df_manual[t]
+        self.df_ind = df_ind[t]
 
         # self.meta_model = LogisticRegression()
         self.meta_model = LinearRegression()
@@ -329,7 +326,7 @@ class Table(MLCommander):
         print(f'wrote {p}')
         plt.show()
 
-    def run_mean(self):
+    def run_demographic(self):
         m = []
 
         dfs = OrderedDict((
@@ -369,7 +366,7 @@ class Table(MLCommander):
         o = pd.DataFrame(m)
 
         header = [f'{label} ({len(df)} cases)' for label, (name, df) in zip(['test', 'train', 'independent'], dfs.items())]
-        o.to_excel('out/mean.xlsx', index=False, header=['column'] + header)
+        o.to_excel('out/demographic.xlsx', index=False, header=['column'] + header)
 
     def run_cm(self):
         cm =  np.array([[38,  8], [ 0,  2]])
@@ -386,6 +383,28 @@ class Table(MLCommander):
         ax.set_xlabel('Prediction')
         ax.set_title(f'Sens: {sens:.2f} Spec: {spec:.2f}')
         plt.show()
+
+    def arg_corr(self, parser):
+        parser.add_argument('--target', '-t', default='all', choices=['all', 'train', 'test', 'ind'])
+
+    def run_corr(self):
+        df = {
+            'all': self.df_all,
+            'train': self.df_train,
+            'test': self.df_test,
+            'ind': self.df_ind,
+        }[self.args.target]
+
+        plt.figure(figsize=(12, 9))
+        # plt.rcParams['figure.subplot.bottom'] = 0.3
+        # plt.rcParams['lines.linewidth'] = 3
+        df = df.rename(columns=col_to_label)
+        ax = sns.heatmap(df.corr(), vmax=1, vmin=-1, center=0, annot=True)
+        ax.set_xticklabels(ax.get_xticklabels(), rotation=40)
+        plt.subplots_adjust(bottom=0.15, left=0.2)
+        plt.savefig(f'out/corr_{self.args.target}.png')
+        plt.show()
+
 
 runner = Table()
 runner.run()

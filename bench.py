@@ -12,7 +12,7 @@ from torch import nn, optim
 from torch.utils.data import TensorDataset, DataLoader
 
 from endaaman import Timer
-from datasets import cols_feature
+from datasets.table import cols_feature
 
 class Bench:
     def __init__(self, num_folds, seed):
@@ -138,8 +138,6 @@ class LightGBMBench(Bench):
         tmp['importance'] = model.feature_importance(importance_type='gain')
         # tmp['importance'] = model.feature_importance(importance_type='split')
         tmp['fold'] = fold + 1
-        print(fold, tmp)
-        print()
         self.df_feature_importance = pd.concat([self.df_feature_importance, tmp], axis=0)
 
         return model
