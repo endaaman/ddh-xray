@@ -8,11 +8,13 @@ import time
 import functools
 from pprint import pprint
 from collections import namedtuple, Counter
+from typing import NamedTuple
 
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 import numpy as np
+from PIL.Image import Image as ImageType
 from PIL import Image, ImageFilter, ImageOps, ImageFile
 from matplotlib import pyplot as plt
 import torch
@@ -33,6 +35,23 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 ORIGINAL_IMAGE_SIZE = 624
 IMAGE_MEAN = 0.4838
 IMAGE_STD = 0.3271
+
+BASE_AUGS = [
+    A.HorizontalFlip(p=0.5),
+    A.GaussNoise(p=0.2),
+    A.OneOf([
+        A.MotionBlur(p=.2),
+        A.MedianBlur(blur_limit=3, p=0.1),
+        A.Blur(blur_limit=3, p=0.1),
+    ], p=0.2),
+    A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.2, rotate_limit=5, p=0.5),
+    A.OneOf([
+        A.CLAHE(clip_limit=2),
+        A.Emboss(),
+        A.RandomBrightnessContrast(),
+    ], p=0.3),
+    A.HueSaturationValue(p=0.3),
+]
 
 def read_label_as_df(path):
     with open(path, 'r', encoding='utf-8') as f:
@@ -69,7 +88,16 @@ def label_to_str(label):
     return '\n'.join([l[1] for l in lines])
 
 
-XRBBItem = namedtuple('XRItem', ['image', 'name', 'bb', 'image_path', 'label_path'])
+
+class ClsItem(NamedTuple):
+    name: str
+    image: ImageType
+    treatment: bool
+
+class BBItem(NamedTuple):
+    name: str
+    image: ImageType
+    bb: pd.DataFrame
 
 
 def pad_to_fixed_size(img, size=(256, 128), bg=(0,0,0)):
@@ -143,9 +171,31 @@ class SSDAdapter():
         return images, (torch.from_numpy(bboxes), torch.from_numpy(labels))
 
 
+def load_df(target, test_ratio, seed):
+    df_all = pd.read_excel('data/table.xlsx', index_col=0, converters={'label': str})
 
-class ROIDataset(Dataset):
-    def __init__(self, target='train', mode='default', test_ratio=0.25, image_size=512, normalized=True, seed=42):
+    if test_ratio > 0:
+        df_train, df_test = train_test_split(
+            df_all,
+            test_size=test_ratio,
+            random_state=seed,
+            stratify=df_all['treatment'],
+        )
+        df_test['test'] = 1
+        df_train['test'] = 0
+    else:
+        df_train = df_all[df_all['test'] > 0]
+        df_test = df_all[df_all['test'] < 1]
+
+    return {
+        'all': df_all,
+        'train': df_train,
+        'test': df_test,
+    }[target]
+
+
+class XRBBDataset(Dataset):
+    def __init__(self, target='train', mode='default', test_ratio=-1, size=512, normalized=True, seed=42):
         self.target = target
         self.mode = mode
         self.normalized = normalized
@@ -158,30 +208,26 @@ class ROIDataset(Dataset):
             'yolo': YOLOAdapter(),
             'ssd': SSDAdapter(),
         }[mode]
-        self.items = self.load_items()
+
+        self.df = load_df(target, test_ratio, seed)
+        self.items = []
+        for idx in tqdm(self.df.index, leave=False, total=len(self.df)):
+            image_path = f'data/images/{idx}.jpg'
+            label_path = f'data/label/{idx}.txt'
+            self.items.append(BBItem(
+                name=idx,
+                image=Image.open(image_path),
+                bb=read_label_as_df(label_path)))
+        print(f'{target} images loaded')
 
         self.horizontal_filpper_index = None
-
         # mean, std = calc_mean_and_std([item.image for item in self.items])
         # print(mean, std)
 
         if self.target == 'train':
             augs = [
-                A.RandomResizedCrop(width=image_size, height=image_size, scale=[0.7, 1.0]),
-                A.HorizontalFlip(p=0.5),
-                A.GaussNoise(p=0.2),
-                A.OneOf([
-                    A.MotionBlur(p=.2),
-                    A.MedianBlur(blur_limit=3, p=0.1),
-                    A.Blur(blur_limit=3, p=0.1),
-                ], p=0.2),
-                A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.2, rotate_limit=5, p=0.5),
-                A.OneOf([
-                    A.CLAHE(clip_limit=2),
-                    A.Emboss(),
-                    A.RandomBrightnessContrast(),
-                ], p=0.3),
-                A.HueSaturationValue(p=0.3),
+                A.RandomResizedCrop(width=size, height=size, scale=[0.7, 1.0]),
+                *BASE_AUGS
             ]
         else:
             augs = []
@@ -197,36 +243,6 @@ class ROIDataset(Dataset):
             if isinstance(t, A.HorizontalFlip):
                 self.horizontal_filpper_index = i
                 break
-
-    def load_items(self):
-        base_dir = 'data/roi'
-        paths_all = sorted(glob(os.path.join(base_dir, 'image/*.jpg')))
-
-        paths_train, paths_test = train_test_split(
-            paths_all,
-            test_size=self.test_ratio,
-            random_state=self.seed)
-
-        paths = paths_all
-        if self.target == 'train':
-            paths = paths_train
-        elif self.target == 'test':
-            paths = paths_test
-
-        items = []
-        t = tqdm(paths, leave=False)
-        for image_path in t:
-            file_name = os.path.basename(image_path)
-            base_name = os.path.splitext(file_name)[0]
-
-            label_path = os.path.join(base_dir, f'label/{base_name}.txt')
-            bb_df = read_label_as_df(label_path)
-            image = Image.open(image_path)
-            items.append(XRBBItem(image, base_name, bb_df, image_path, label_path))
-            t.set_description(f'loaded {image_path}')
-            t.refresh()
-        print(f'{self.target} images loaded')
-        return items
 
     def validate_id(self):
         for item in tqdm(self.items):
@@ -260,31 +276,101 @@ class ROIDataset(Dataset):
         return self.adapter(images, bboxes, labels)
 
 
-class ROICroppedDataset(Dataset):
-    def __init__(self, image_size=(256, 128), **kwargs):
-        super().__init__(**kwargs)
-        full_df = pd.read_excel('data/table.xlsx')
-        self.df = full_df[full_df['test'] == 0 if self.is_training else 1]
-        self.image_size = image_size
-        # self.df = full_df
+
+class XRDataset(Dataset):
+    def __init__(self, target='train', test_ratio=-1, size=512, normalized=True, seed=42):
+        self.target = target
+        self.test_ratio = test_ratio
+        self.normalized = normalized
+        self.seed = seed
+
+        self.df = load_df(target, test_ratio, seed)
+        self.items = []
+        for idx, row in tqdm(self.df.iterrows(), leave=False, total=len(self.df)):
+            self.items.append(ClsItem(
+                name=idx,
+                image=Image.open(f'data/images/{idx}.jpg'),
+                treatment=row.treatment))
+        print(f'{target} images loaded')
+
+        if self.target == 'train':
+            augs = [
+                A.RandomResizedCrop(width=size, height=size, scale=[0.7, 1.0]),
+                *BASE_AUGS
+            ]
+        else:
+            augs = []
+
+        if normalized:
+            augs.append(A.Normalize(*[[v] * 3 for v in [IMAGE_MEAN, IMAGE_STD]]))
+        augs.append(ToTensorV2())
+        self.albu = A.Compose(augs)
+
+    def __len__(self):
+        return len(self.items)
 
     def __getitem__(self, idx):
         item = self.items[idx]
-        image = item.image
-        vv = np.round(item.label.values[:, :4]).astype(np.int)
-        # top-left edge
-        left, top = np.min(vv[:, [0, 1]], axis=0)
-        # bottom-right edge
-        right, bottom = np.max(vv[:, [2, 3]], axis=0)
-        x = image.crop((left, top, right, bottom))
-        found = self.df[self.df['label'] == int(item.name)]
+        x = self.albu(image=np.array(item.image))['image']
+        y = torch.FloatTensor([item.diagnosis])
+        return x, y
 
-        y = int(found['treatment'].values[0])
-        if self.augmentation:
-            x, y = self.augmentation(x, y)
-        # if y > 0:
-        #     x = ImageOps.invert(x)
-        return self.transform(x, y)
+
+class XRROIDataset(Dataset):
+    def __init__(self, base_dir='data/roi', target='train', test_ratio=-1, size=(512, 256), normalized=True, seed=42):
+        self.size = size
+
+        self.target = target
+        self.test_ratio = test_ratio
+        self.normalized = normalized
+        self.seed = seed
+
+        self.df = load_df(target, test_ratio, seed)
+        self.items = []
+        for idx, row in tqdm(self.df.index, leave=False, total=len(self.df)):
+            self.items.append(ClsItem(
+                name=idx,
+                image=Image.open(os.path.join(base_dir, f'{idx}.jpg')),
+                treatment=row.treatment))
+        print(f'{target} images loaded')
+
+        if self.target == 'train':
+            augs = [
+                A.RandomResizedCrop(width=size[0], height=size[1], scale=[0.7, 1.0]),
+                *BASE_AUGS
+            ]
+        else:
+            augs = []
+
+        if normalized:
+            augs.append(A.Normalize(*[[v] * 3 for v in [IMAGE_MEAN, IMAGE_STD]]))
+        augs.append(ToTensorV2())
+        self.albu = A.Compose(augs)
+
+
+    def __getitem__(self, idx):
+        item = self.items[idx]
+        x = self.albu(image=np.array(item.image))['image']
+        y = torch.FloatTensor([item.diagnosis])
+        return x, y
+
+    # def __getitem__(self, idx):
+    #     item = self.items[idx]
+    #     image = item.image
+    #     vv = np.round(item.label.values[:, :4]).astype(np.int)
+    #     # top-left edge
+    #     left, top = np.min(vv[:, [0, 1]], axis=0)
+    #     # bottom-right edge
+    #     right, bottom = np.max(vv[:, [2, 3]], axis=0)
+    #     x = image.crop((left, top, right, bottom))
+    #     found = self.df[self.df['label'] == int(item.name)]
+    #
+    #     y = int(found['treatment'].values[0])
+    #     if self.augmentation:
+    #         x, y = self.augmentation(x, y)
+    #     # if y > 0:
+    #     #     x = ImageOps.invert(x)
+    #     return self.transform(x, y)
 
 
 class C(Commander):
@@ -293,7 +379,7 @@ class C(Commander):
         parser.add_argument('--mode', '-m', default='default', choices=['default', 'effdet', 'yolo', 'ssd'])
 
     def pre_common(self):
-        self.ds = ROIDataset(
+        self.ds = XRBBDataset(
             target=self.args.target,
             mode=self.args.mode,
         )
