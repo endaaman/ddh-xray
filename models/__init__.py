@@ -11,6 +11,17 @@ from .yolo_v3 import YOLOv3
 from .yolor import Yolor, YOLOv4, yolor_loss
 
 
+SIZE_BY_DEPTH = {
+    'd0': 128 * 4,
+    'd1': 128 * 5,
+    'd2': 128 * 6,
+    'd3': 128 * 7,
+    'd4': 128 * 8,
+    'd5': 128 * 10,
+    'd6': 128 * 12,
+    'd7': 128 * 14,
+}
+
 class TimmModel(nn.Module):
     def __init__(self, name='tf_efficientnetv2_b0', num_classes=1, activation=True):
         super().__init__()
@@ -36,22 +47,24 @@ def create_model(s):
 
 def create_det_model(name):
     if name == 'yolo':
-        return YOLOv3()
+        return YOLOv3(), 512
 
     if name == 'yolor':
-        return Yolor(num_classes=7)
+        return Yolor(num_classes=7), 512
 
     # if name == 'yolo5':
     #     # model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
     #     return Yolo5(cfg='cfg/yolov5s.yaml')
 
-    if m := re.match(r'^effdet_b(\d)$', name):
-        cfg = get_efficientdet_config(f'tf_efficientdet_{m[1]}')
+    if m := re.match(r'^effdet_d(\d)$', name):
+        depth = m[1]
+        cfg = get_efficientdet_config(f'tf_efficientdet_d{depth}')
         cfg.num_classes = 6
-        return EfficientDet(cfg)
+        size = SIZE_BY_DEPTH[f'd{depth}']
+        return EfficientDet(cfg), size
 
     if name == 'ssd':
-        return SSD300(n_classes=7)
+        return SSD300(n_classes=7), 512
 
     raise ValueError(f'Ivalid name: {name}')
 

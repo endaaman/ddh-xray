@@ -22,20 +22,9 @@ from endaaman.trainer import TrainCommander, Trainer
 
 from datasets import XRBBDataset
 from utils import get_state_dict
-from models import create_det_model, yolor_loss
+from models import create_det_model, yolor_loss, SIZE_BY_DEPTH
 from models.ssd import MultiBoxLoss
 
-
-SIZE_BY_DEPTH = {
-    'd0': 128 * 4,
-    'd1': 128 * 5,
-    'd2': 128 * 6,
-    'd3': 128 * 7,
-    'd4': 128 * 8,
-    'd5': 128 * 10,
-    'd6': 128 * 12,
-    'd7': 128 * 14,
-}
 
 
 class EffDetTrainer(Trainer):
@@ -43,14 +32,18 @@ class EffDetTrainer(Trainer):
         # self.criterion = FocalBCELoss(gamma=4.0)
         self.bench = DetBenchTrain(self.model).to(self.device)
 
-    # def create_scheduler(self, lr):
-    #     return CosineLRScheduler(
-    #         self.optimizer, t_initial=100, lr_min=0.00001,
-    #         warmup_t=10, warmup_lr_init=0.00005, warmup_prefix=True)
-    # def hook_load_state(self, checkpoint):
-    #     self.scheduler.step(checkpoint.epoch-1)
-    # def step(self, train_loss):
-    #     self.scheduler.step(self.current_epoch)
+    def create_scheduler(self, lr):
+        return CosineLRScheduler(
+            self.optimizer,
+            warmup_t=5, t_initial=90,
+            warmup_lr_init=lr/2, lr_min=lr/1000,
+            warmup_prefix=True)
+
+    def hook_load_state(self, checkpoint):
+        self.scheduler.step(checkpoint.epoch-1)
+
+    def step(self, train_loss):
+        self.scheduler.step(self.current_epoch)
 
     def eval(self, inputs, labels):
         inputs = inputs.to(self.device)
@@ -74,13 +67,13 @@ class CMD(TrainCommander):
         pass
         # parser.add_argument('--no-aug', action='store_true')
 
-    def create_loaders(self, mode, image_size, collate_fn=None):
+    def create_loaders(self, mode, size, collate_fn=None):
         if mode not in ['effdet', 'yolo', 'ssd']:
             raise ValueError(f'Invalid target: {mode}')
 
         return [
             self.as_loader(
-                XRBBDataset(mode=mode, target=target, size=image_size),
+                XRBBDataset(mode=mode, target=target, size=size),
                 collate_fn=collate_fn
             ) for target in ['train', 'test']
         ]
@@ -90,8 +83,8 @@ class CMD(TrainCommander):
 
     def run_effdet(self):
         name = f'effdet_{self.a.depth}'
-        model = create_det_model(name)
-        loaders = self.create_loaders('effdet', SIZE_BY_DEPTH[self.args.depth])
+        model, size = create_det_model(name)
+        loaders = self.create_loaders(mode='effdet', size=size)
 
         trainer = self.create_trainer(
             T=EffDetTrainer,
@@ -103,13 +96,11 @@ class CMD(TrainCommander):
         self.start(trainer)
 
 
-
-
-
 if __name__ == '__main__':
     cmd = CMD({
         'epoch': 100,
-        'lr': 0.0001,
-        'batch_size': 32,
+        'lr': 0.01,
+        'batch_size': 8,
+        'save_period': 20,
     })
     cmd.run()

@@ -9,7 +9,6 @@ from torchvision import transforms
 from torchvision.utils import draw_bounding_boxes
 
 
-
 IMAGE_SIZE = 624
 
 # class Annotation(RecordClass):

@@ -24,13 +24,57 @@ from torchvision.utils import draw_bounding_boxes
 import albumentations as A
 from albumentations.pytorch.transforms import ToTensorV2
 
-
 from endaaman import Commander
 from endaaman.torch import pil_to_tensor, tensor_to_pil
 
-from utils import XrayBBItem, calc_mean_and_std, label_to_tensor, draw_bb
+from utils import  draw_bb
+
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
+
+LABEL_TO_STR = {
+    1: 'right top',
+    2: 'right out',
+    3: 'right in',
+    4: 'left top',
+    5: 'left out',
+    6: 'left in',
+}
+
+col_target = 'treatment'
+cols_measure = ['left_alpha', 'right_alpha', 'left_oe', 'right_oe', 'left_a', 'right_a', 'left_b', 'right_b', ]
+
+# cols_cat = ['female', 'family_history', 'breech_presentation', 'skin_laterality', 'limb_limitation']
+# cols_cat = ['female', 'family_history', 'skin_laterality', 'limb_limitation']
+# cols_val = ['left_alpha', 'right_alpha', 'left_oe', 'right_oe', 'left_a', 'right_a', 'left_b', 'right_b', ]
+
+cols_cat = []
+cols_val = ['female', 'breech_presentation'] + cols_measure
+# cols_val = ['female', 'breech_presentation'] + cols_measure
+
+do_abs = lambda x: np.power(x, 2)
+# do_abs = lambda x: x
+cols_extend = {
+    # 'alpha_diff': lambda x: do_abs(x['left_alpha'] - x['right_alpha']),
+    # 'oe_diff': lambda x: do_abs(x['left_oe'] - x['right_oe']),
+    # 'a_diff': lambda x: do_abs(x['left_a'] - x['right_a']),
+    # 'b_diff': lambda x: do_abs(x['left_b'] - x['right_b']),
+}
+cols_feature = cols_cat + cols_val + list(cols_extend.keys())
+
+col_to_label = {
+    'female': 'Female',
+    'breech_presentation': 'Breech presentation',
+    'left_a': 'Left A',
+    'right_a': 'Right A',
+    'left_b': 'Left B',
+    'right_b': 'Right B',
+    'left_alpha': 'Left α',
+    'right_alpha': 'Right α',
+    'left_oe': 'Left OE',
+    'right_oe': 'Right OE',
+}
+
 
 ORIGINAL_IMAGE_SIZE = 624
 IMAGE_MEAN = 0.4838
@@ -212,7 +256,7 @@ class BaseDataset(Dataset): # pylint: disable=abstract-method
                 *BASE_AUGS
             ]
         else:
-            augs = []
+            augs = [A.Resize(width=width, height=height)]
 
         if self.normalized:
             augs.append(A.Normalize(*[[v] * 3 for v in [IMAGE_MEAN, IMAGE_STD]]))
@@ -237,7 +281,7 @@ class XRBBDataset(BaseDataset):
         self.items = []
         for idx in tqdm(self.df.index, leave=False, total=len(self.df)):
             image_path = f'data/images/{idx}.jpg'
-            label_path = f'data/label/{idx}.txt'
+            label_path = f'data/labels/{idx}.txt'
             self.items.append(BBItem(
                 name=idx,
                 image=Image.open(image_path),
@@ -245,8 +289,6 @@ class XRBBDataset(BaseDataset):
         print(f'{self.target} images loaded')
 
         self.horizontal_filpper_index = None
-        # mean, std = calc_mean_and_std([item.image for item in self.items])
-        # print(mean, std)
 
         if self.target == 'train':
             augs = [
@@ -254,7 +296,7 @@ class XRBBDataset(BaseDataset):
                 *BASE_AUGS
             ]
         else:
-            augs = []
+            augs = [A.Resize(width=size, height=size)]
 
         self.albu = A.ReplayCompose([
             *augs,

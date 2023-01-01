@@ -14,33 +14,13 @@ from effdet import EfficientDet, DetBenchPredict, get_efficientdet_config
 from effdet.efficientdet import HeadNet
 
 from augmentation import ResizeAugmentation
-from models import YOLOv3, Yolor
+from models import YOLOv3, Yolor, SIZE_BY_DEPTH
 from models.yolo_v3 import non_max_suppression, rescale_boxes
 from utils import pil_to_tensor
 
-from datasets import ROIDataset, label_to_str
+from datasets import ROIDataset, label_to_str, LABEL_TO_STR, IMAGE_MEAN, IMAGE_STD
 from endaaman.torch import TorchCommander
 
-
-SIZE_BY_DEPTH = {
-    'd0': 128 * 4,
-    'd1': 128 * 5,
-    'd2': 128 * 6,
-    'd3': 128 * 7,
-    'd4': 128 * 8,
-    'd5': 128 * 10,
-    'd6': 128 * 12,
-    'd7': 128 * 14,
-}
-
-LABEL_TO_STR = {
-    1: 'right top',
-    2: 'right out',
-    3: 'right in',
-    4: 'left top',
-    5: 'left out',
-    6: 'left in',
-}
 
 class EffdetPredictor:
     def __init__(self, bench, model, image_size):
@@ -52,7 +32,7 @@ class EffdetPredictor:
         return self.image_size
 
     def __call__(self, inputs):
-        pred_clss, __pred_boxes = self.model(inputs)
+        # pred_clss, __pred_boxes = self.model(inputs)
         outputs = self.bench(inputs).detach().cpu().type(torch.long)
         outputs[:, :, 4] = outputs[:, :, 5]
         # x0, y0, x1, y1, label
@@ -157,7 +137,7 @@ class Predictor(TorchCommander):
         imgs = [i.resize((image_size, image_size)) for i in imgs]
         transform_image = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize([0.4831]*3, [0.3257]*3),
+            transforms.Normalize([IMAGE_MEAN]*3, [IMAGE_STD]*3),
         ])
 
         bs = self.args.batch_size
