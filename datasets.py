@@ -53,6 +53,7 @@ BASE_AUGS = [
     A.HueSaturationValue(p=0.3),
 ]
 
+
 def read_label_as_df(path):
     with open(path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
@@ -171,36 +172,60 @@ class SSDAdapter():
         return images, (torch.from_numpy(bboxes), torch.from_numpy(labels))
 
 
-def load_df(target, test_ratio, seed):
-    df_all = pd.read_excel('data/table.xlsx', index_col=0, converters={'label': str})
-
-    if test_ratio > 0:
-        df_train, df_test = train_test_split(
-            df_all,
-            test_size=test_ratio,
-            random_state=seed,
-            stratify=df_all['treatment'],
-        )
-        df_test['test'] = 1
-        df_train['test'] = 0
-    else:
-        df_train = df_all[df_all['test'] > 0]
-        df_test = df_all[df_all['test'] < 1]
-
-    return {
-        'all': df_all,
-        'train': df_train,
-        'test': df_test,
-    }[target]
-
-
-class XRBBDataset(Dataset):
-    def __init__(self, target='train', mode='default', test_ratio=-1, size=512, normalized=True, seed=42):
+class BaseDataset(Dataset): # pylint: disable=abstract-method
+    def __init__(self, target='train', test_ratio=-1, normalized=True, seed=42):
         self.target = target
-        self.mode = mode
+        self.test_ratio = test_ratio
         self.normalized = normalized
         self.seed = seed
-        self.test_ratio = test_ratio
+
+        self.df = self.load_df()
+
+    def load_df(self):
+        df_all = pd.read_excel('data/table.xlsx', index_col=0, converters={'label': str})
+
+        if self.test_ratio > 0:
+            df_train, df_test = train_test_split(
+                df_all,
+                test_size=self.test_ratio,
+                random_state=self.seed,
+                stratify=df_all['treatment'],
+            )
+            df_test['test'] = 1
+            df_train['test'] = 0
+        else:
+            df_train = df_all[df_all['test'] > 0]
+            df_test = df_all[df_all['test'] < 1]
+
+        return {
+            'all': df_all,
+            'train': df_train,
+            'test': df_test,
+        }[self.target]
+
+
+    def create_augs(self, width, height):
+        augs = []
+        if self.target == 'train':
+            augs = [
+                A.RandomResizedCrop(width=width, height=height, scale=[0.7, 1.0]),
+                *BASE_AUGS
+            ]
+        else:
+            augs = []
+
+        if self.normalized:
+            augs.append(A.Normalize(*[[v] * 3 for v in [IMAGE_MEAN, IMAGE_STD]]))
+        augs.append(ToTensorV2())
+
+        return augs
+
+
+class XRBBDataset(BaseDataset):
+    def __init__(self, mode='default', size=512, **kwargs):
+        super().__init__(**kwargs)
+
+        self.mode = mode
 
         self.adapter = {
             'default': DefaultDetAdaper(),
@@ -209,7 +234,6 @@ class XRBBDataset(Dataset):
             'ssd': SSDAdapter(),
         }[mode]
 
-        self.df = load_df(target, test_ratio, seed)
         self.items = []
         for idx in tqdm(self.df.index, leave=False, total=len(self.df)):
             image_path = f'data/images/{idx}.jpg'
@@ -218,7 +242,7 @@ class XRBBDataset(Dataset):
                 name=idx,
                 image=Image.open(image_path),
                 bb=read_label_as_df(label_path)))
-        print(f'{target} images loaded')
+        print(f'{self.target} images loaded')
 
         self.horizontal_filpper_index = None
         # mean, std = calc_mean_and_std([item.image for item in self.items])
@@ -277,34 +301,19 @@ class XRBBDataset(Dataset):
 
 
 
-class XRDataset(Dataset):
-    def __init__(self, target='train', test_ratio=-1, size=512, normalized=True, seed=42):
-        self.target = target
-        self.test_ratio = test_ratio
-        self.normalized = normalized
-        self.seed = seed
+class XRDataset(BaseDataset):
+    def __init__(self, size=512, **kwargs):
+        super().__init__(**kwargs)
 
-        self.df = load_df(target, test_ratio, seed)
         self.items = []
         for idx, row in tqdm(self.df.iterrows(), leave=False, total=len(self.df)):
             self.items.append(ClsItem(
                 name=idx,
-                image=Image.open(f'data/images/{idx}.jpg'),
+                image=Image.open(f'data/images/{idx}.jpg').copy(),
                 treatment=row.treatment))
-        print(f'{target} images loaded')
+        print(f'{self.target} images loaded')
 
-        if self.target == 'train':
-            augs = [
-                A.RandomResizedCrop(width=size, height=size, scale=[0.7, 1.0]),
-                *BASE_AUGS
-            ]
-        else:
-            augs = []
-
-        if normalized:
-            augs.append(A.Normalize(*[[v] * 3 for v in [IMAGE_MEAN, IMAGE_STD]]))
-        augs.append(ToTensorV2())
-        self.albu = A.Compose(augs)
+        self.albu = A.Compose(self.create_augs(size, size))
 
     def __len__(self):
         return len(self.items)
@@ -312,46 +321,29 @@ class XRDataset(Dataset):
     def __getitem__(self, idx):
         item = self.items[idx]
         x = self.albu(image=np.array(item.image))['image']
-        y = torch.FloatTensor([item.diagnosis])
+        y = torch.FloatTensor([item.treatment])
         return x, y
 
 
-class XRROIDataset(Dataset):
-    def __init__(self, base_dir='data/roi', target='train', test_ratio=-1, size=(512, 256), normalized=True, seed=42):
-        self.size = size
+class XRROIDataset(BaseDataset):
+    def __init__(self, base_dir='data/roi', size=(512, 256), **kwargs):
+        super().__init__(**kwargs)
 
-        self.target = target
-        self.test_ratio = test_ratio
-        self.normalized = normalized
-        self.seed = seed
-
-        self.df = load_df(target, test_ratio, seed)
         self.items = []
         for idx, row in tqdm(self.df.index, leave=False, total=len(self.df)):
             self.items.append(ClsItem(
                 name=idx,
-                image=Image.open(os.path.join(base_dir, f'{idx}.jpg')),
+                image=Image.open(os.path.join(base_dir, f'{idx}.jpg')).copy(),
                 treatment=row.treatment))
-        print(f'{target} images loaded')
+        print(f'{self.target} images loaded')
 
-        if self.target == 'train':
-            augs = [
-                A.RandomResizedCrop(width=size[0], height=size[1], scale=[0.7, 1.0]),
-                *BASE_AUGS
-            ]
-        else:
-            augs = []
-
-        if normalized:
-            augs.append(A.Normalize(*[[v] * 3 for v in [IMAGE_MEAN, IMAGE_STD]]))
-        augs.append(ToTensorV2())
-        self.albu = A.Compose(augs)
+        self.albu = A.Compose(self.create_augs(size[0], size[1]))
 
 
     def __getitem__(self, idx):
         item = self.items[idx]
         x = self.albu(image=np.array(item.image))['image']
-        y = torch.FloatTensor([item.diagnosis])
+        y = torch.FloatTensor([item.treatment])
         return x, y
 
     # def __getitem__(self, idx):

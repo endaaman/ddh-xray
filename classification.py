@@ -11,8 +11,7 @@ import torch
 from torch import nn
 from torch import optim
 from timm.scheduler.cosine_lr import CosineLRScheduler
-from endaaman.torch import TrainCommander
-from endaaman.trainer import Trainer
+from endaaman.trainer import TrainCommander, Trainer
 from endaaman.metrics import BinaryAccuracy, BinaryAUC, BinaryRecall, BinarySpecificity
 
 from models import create_model
@@ -58,7 +57,7 @@ class CMD(TrainCommander):
         parser.add_argument('--model', '-m', default='tf_efficientnetv2_b0')
 
     def arg_xr(self, parser):
-        parser.add_argument('--size', type=int, default=512)
+        parser.add_argument('--size', type=int, default=768)
 
     def run_xr(self):
         model = create_model(self.args.model)
@@ -101,8 +100,8 @@ class CMD(TrainCommander):
 
 if __name__ == '__main__':
     cmd = CMD({
-        'epoch': 100,
+        'epoch': 50,
         'lr': 0.0001,
-        'batch_size': 16,
+        'batch_size': 32,
     })
     cmd.run()

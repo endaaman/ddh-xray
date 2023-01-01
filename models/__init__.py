@@ -4,6 +4,7 @@ import re
 import timm
 from torch import nn
 from torchvision import transforms, models
+from effdet import EfficientDet, get_efficientdet_config
 
 from .ssd import SSD300
 from .yolo_v3 import YOLOv3
@@ -33,5 +34,24 @@ class TimmModel(nn.Module):
 def create_model(s):
     return TimmModel(name=s, num_classes=1)
 
-def create_det_model(s):
-    return TimmModel(name=s, num_classes=1)
+def create_det_model(name):
+    if name == 'yolo':
+        return YOLOv3()
+
+    if name == 'yolor':
+        return Yolor(num_classes=7)
+
+    # if name == 'yolo5':
+    #     # model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
+    #     return Yolo5(cfg='cfg/yolov5s.yaml')
+
+    if m := re.match(r'^effdet_b(\d)$', name):
+        cfg = get_efficientdet_config(f'tf_efficientdet_{m[1]}')
+        cfg.num_classes = 6
+        return EfficientDet(cfg)
+
+    if name == 'ssd':
+        return SSD300(n_classes=7)
+
+    raise ValueError(f'Ivalid name: {name}')
+
