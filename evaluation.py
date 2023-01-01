@@ -53,7 +53,7 @@ class CMD(TorchCommander):
         self.model.eval()
         self.bench = DetBenchPredict(self.model).to(self.device)
 
-        self.font = ImageFont.truetype('/usr/share/fonts/ubuntu/Ubuntu-L.ttf', 16)
+        self.font = ImageFont.truetype('/usr/share/fonts/ubuntu/Ubuntu-L.ttf', 20)
 
 
     def detect_rois(self, imgs, image_size):
@@ -105,8 +105,8 @@ class CMD(TorchCommander):
             for _, bb in enumerate(bbs):
                 label = bb[4].item()
                 bbox = bb[:4]
-                draw.rectangle(((bbox[0], bbox[1]), (bbox[2], bbox[3])), outline='pink', width=1)
-                draw.text((bbox[0], bbox[1]), LABEL_TO_STR[label], font=self.font, fill='deeppink')
+                draw.rectangle(((bbox[0], bbox[1]), (bbox[2], bbox[3])), outline='yellow', width=1)
+                draw.text((bbox[0], bbox[1]), LABEL_TO_STR[label], font=self.font, fill='yellow')
             results.append(img)
         return results
 
