@@ -102,7 +102,7 @@ def read_label_as_df(path):
     with open(path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
 
-    cols = ['x0', 'y0', 'x1', 'y1', 'id']
+    cols = ['x0', 'y0', 'x1', 'y1', 'label']
     data = []
     for line in lines:
         parted  = line.split(' ')
@@ -238,8 +238,8 @@ class BaseDataset(Dataset): # pylint: disable=abstract-method
             df_test['test'] = 1
             df_train['test'] = 0
         else:
-            df_train = df_all[df_all['test'] > 0]
-            df_test = df_all[df_all['test'] < 1]
+            df_test = df_all[df_all['test'] > 0]
+            df_train = df_all[df_all['test'] < 1]
 
         return {
             'all': df_all,
@@ -252,7 +252,7 @@ class BaseDataset(Dataset): # pylint: disable=abstract-method
         augs = []
         if self.target == 'train':
             augs = [
-                A.RandomResizedCrop(width=width, height=height, scale=[0.7, 1.0]),
+                A.RandomResizedCrop(width=width, height=height, scale=[0.8, 1.2]),
                 *BASE_AUGS
             ]
         else:
@@ -292,7 +292,8 @@ class XRBBDataset(BaseDataset):
 
         if self.target == 'train':
             augs = [
-                A.RandomResizedCrop(width=size, height=size, scale=[0.7, 1.0]),
+                A.Resize(width=size, height=size),
+                A.RandomResizedCrop(width=size, height=size, scale=[0.8, 1.2]),
                 *BASE_AUGS
             ]
         else:

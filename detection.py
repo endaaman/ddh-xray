@@ -101,6 +101,6 @@ if __name__ == '__main__':
         'epoch': 100,
         'lr': 0.01,
         'batch_size': 8,
-        'save_period': 20,
+        'save_period': 25,
     })
     cmd.run()

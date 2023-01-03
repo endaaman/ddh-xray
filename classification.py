@@ -72,19 +72,20 @@ class CMD(TrainCommander):
             name='xr_' + self.args.model,
             model=model,
             loaders=loaders,
+            log_dir='data/logs_xr',
         )
 
         trainer.start(self.args.epoch, lr=self.args.lr)
 
 
-    def arg_roi(self, parser):
-        parser.add_argument('--size', type=int, default=512)
+    # def arg_roi(self, parser):
+    #     parser.add_argument('--size', type=int, default=512)
 
     def run_roi(self):
         model = create_model(self.args.model)
 
         loaders = [self.as_loader(XRROIDataset(
-            size=self.args.size,
+            size=(512, 256),
             target=t,
         )) for t in ['train', 'test']]
 
@@ -93,6 +94,7 @@ class CMD(TrainCommander):
             name='roi_' + self.args.model,
             model=model,
             loaders=loaders,
+            log_dir='data/logs_roi',
         )
 
         trainer.start(self.args.epoch, lr=self.args.lr)

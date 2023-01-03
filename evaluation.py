@@ -17,7 +17,7 @@ from effdet import DetBenchPredict
 from endaaman.torch import TorchCommander
 
 from models import create_det_model
-from datasets import XRDataset, XRROIDataset, LABEL_TO_STR, IMAGE_MEAN, IMAGE_STD
+from datasets import XRBBDataset, XRROIDataset, LABEL_TO_STR, IMAGE_MEAN, IMAGE_STD
 
 
 COLOR = 'yellow'
@@ -88,7 +88,6 @@ class CMD(TorchCommander):
                     # (w, h) -> (w, w, h, h)
                     scale = scales[idx].repeat_interleave(2)
                     bbs[:, :4] *= scale
-                    bbs = bbs.round().long()
                     bbss.append(bbs)
                     idx += 1
 
@@ -143,13 +142,20 @@ class CMD(TorchCommander):
         print('done')
 
     def arg_map(self, parser):
-        parser.add_argument('--src', '-s', required=True)
+        parser.add_argument('--target', '-t', default='test', choices=['train', 'test'])
 
     def run_map(self):
-        images, _paths = self.load_images_from_dir_or_file(self.args.src)
+        ds = XRBBDataset(mode='effdet', target=self.a.target, size=self.image_size)
 
-        # bbss = self.detect_rois(images, self.image_size)
-        # print(results)
+        images = [i.image for i in ds.items]
+        bbss = self.detect_rois(images, self.image_size)
+
+        for (bbs, item) in zip(bbss, ds.items):
+            print(bbs)
+            print(item.bb)
+            self.bbs = bbs
+            self.item = item
+            break
 
 
 
