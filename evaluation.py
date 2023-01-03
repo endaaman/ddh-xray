@@ -110,10 +110,10 @@ class CMD(TorchCommander):
             results.append(img)
         return results
 
-    def arg_roi(self, parser):
+    def arg_xr(self, parser):
         parser.add_argument('--src', '-s', required=True)
 
-    def run_roi(self):
+    def run_xr(self):
         paths = get_paths_from_dir_or_file(self.a.src)
         images = [Image(p) for p in paths]
 
