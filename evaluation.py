@@ -14,6 +14,7 @@ from torch import optim
 from torchvision import transforms
 
 from effdet import DetBenchPredict
+from endaaman import get_paths_from_dir_or_file
 from endaaman.torch import TorchCommander
 
 from models import create_det_model
@@ -109,26 +110,30 @@ class CMD(TorchCommander):
             results.append(img)
         return results
 
-
-    def load_images_from_dir_or_file(self, src):
-        paths = []
-        if os.path.isdir(src):
-            paths = glob(os.path.join(src, '*.jpg')) + glob(os.path.join(src, '*.png'))
-            images = [Image.open(p) for p in paths]
-        elif os.path.isfile(src):
-            paths = [src]
-            images = [Image.open(src)]
-
-        if len(images) == 0:
-            raise RuntimeError(f'Invalid src: {src}')
-
-        return images, paths
-
-    def arg_file(self, parser):
+    def arg_roi(self, parser):
         parser.add_argument('--src', '-s', required=True)
 
-    def run_file(self):
-        images, paths = self.load_images_from_dir_or_file(self.args.src)
+    def run_roi(self):
+        paths = get_paths_from_dir_or_file(self.a.src)
+        images = [Image(p) for p in paths]
+
+        bbss = self.detect_rois(images, self.image_size)
+        results = self.draw_bbs(images, bbss)
+
+        dest_dir = os.path.join('out', self.checkpoint.name, 'predict')
+        os.makedirs(dest_dir, exist_ok=True)
+        for result, path in zip(results, paths):
+            name = os.path.splitext(os.path.basename(path))[0]
+            result.save(os.path.join(dest_dir, f'{name}.jpg'))
+
+        print('done')
+
+    def arg_roi(self, parser):
+        parser.add_argument('--src', '-s', required=True)
+
+    def run_roi(self):
+        paths = get_paths_from_dir_or_file(self.a.src)
+        images = [Image(p) for p in paths]
 
         bbss = self.detect_rois(images, self.image_size)
         results = self.draw_bbs(images, bbss)
