@@ -18,6 +18,7 @@ from torchvision import transforms
 from effdet import DetBenchTrain, DetBenchPredict
 from ptflops import get_model_complexity_info
 from timm.scheduler import CosineLRScheduler
+from mean_average_precision import MetricBuilder
 
 from endaaman import get_paths_from_dir_or_file
 from endaaman.torch import TorchCommander, Trainer, Predictor
@@ -82,6 +83,10 @@ class EffDetPredictor(Predictor):
         m = re.match(r'.*_(d\d)$', self.checkpoint.name)
         assert m
         self.image_size = SIZE_BY_DEPTH[m[1]]
+        self.transform_image = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(IMAGE_MEAN, IMAGE_STD),
+        ])
 
     def create_model(self):
         model = create_det_model(self.checkpoint.name)
@@ -98,7 +103,7 @@ class EffDetPredictor(Predictor):
         if len(missing) > 0:
             print(f'[{idx}] missing: {missing}')
         # bbs: [[x0, y0, x1, y1, cls, index]]
-        bbs[:, 5] = idx
+        # bbs[:, 5] = idx
         return bbs
 
     def start(self, images):
@@ -110,6 +115,37 @@ class EffDetPredictor(Predictor):
             scale = scale.repeat_interleave(2)
             bbs[:, :4] *= scale
         return bbss
+
+
+def calc_iou(a, b):
+    a_area = (a[...,2] - a[...,0]) * (a[...,3] - a[...,1])
+    b_area = (b[...,2] - b[...,0]) * (b[...,3] - b[...,1])
+    x_min = torch.maximum(a[...,0], b[...,0])
+    y_min = torch.maximum(a[...,1], b[...,1])
+    x_max = torch.minimum(a[...,2], b[...,2])
+    y_max = torch.minimum(a[...,3], b[...,3])
+    w = torch.maximum(torch.tensor(.0), x_max - x_min)
+    h = torch.maximum(torch.tensor(.0), y_max - y_min)
+    intersect = w * h
+    return intersect / (a_area + b_area - intersect)
+
+
+def calc_aps(pred_bbss, gt_bbss):
+    iouss = []
+    # 画像ごと
+    entries = []
+    for (pred_bbs, gt_bbs) in zip(pred_bbss, gt_bbss):
+        # ラベルごと
+        for label in LABEL_TO_STR:
+            preds = pred_bbs[pred_bbs[:, 4].long() == label][:, :4]
+            gts = gt_bbs[gt_bbs[:, 4].long() == label][:, :4]
+            # bbごとに同クラスのすべてのgt bbとiouを算出
+            for pred in preds:
+                a = pred.repeat(len(gts)).view(len(gts), -1)
+                ious = calc_iou(a, gts)
+            iouss.append(iou)
+    return iouss
+
 
 
 class CMD(TorchCommander):
@@ -143,16 +179,16 @@ class CMD(TorchCommander):
         self.start(trainer)
 
 
-    def draw_bbs(self, imgs, bbss):
+    def draw_bbs(self, imgs, bbss, color='yellow'):
         font = ImageFont.truetype('/usr/share/fonts/ubuntu/Ubuntu-L.ttf', 20)
         results = []
         for img, bbs in zip(imgs, bbss):
             draw = ImageDraw.Draw(img)
             for _, bb in enumerate(bbs):
-                label = bb[4].item()
+                label = bb[4].long().item()
                 bbox = bb[:4]
-                draw.rectangle(((bbox[0], bbox[1]), (bbox[2], bbox[3])), outline='yellow', width=1)
-                draw.text((bbox[0], bbox[1]), LABEL_TO_STR[label], font=font, fill='yellow')
+                draw.rectangle(((bbox[0], bbox[1]), (bbox[2], bbox[3])), outline=color, width=1)
+                draw.text((bbox[0], bbox[1]), LABEL_TO_STR[label], font=font, fill=color)
             results.append(img)
         return results
 
@@ -162,18 +198,12 @@ class CMD(TorchCommander):
 
     def run_predict(self):
         checkpoint = torch.load(self.args.checkpoint, map_location=lambda storage, loc: storage)
-
-        predictor = self.create_predictor(
-            P=EffDetPredictor,
-            checkpoint=checkpoint,
-            image_mean=IMAGE_MEAN,
-            image_std=IMAGE_STD)
+        predictor = self.create_predictor(P=EffDetPredictor, checkpoint=checkpoint)
 
         paths = get_paths_from_dir_or_file(self.a.src)
         images = [Image.open(p) for p in paths]
 
         bbss = predictor.start(images=images)
-
         results = self.draw_bbs(images, bbss)
 
         dest_dir = os.path.join('out', checkpoint.name, 'predict')
@@ -184,22 +214,55 @@ class CMD(TorchCommander):
 
         print('done')
 
+
+    def arg_ds(self, parser):
+        parser.add_argument('--checkpoint', '-c', required=True)
+        parser.add_argument('--target', '-t', default='test', choices=['train', 'test'])
+
+    def run_ds(self):
+        checkpoint = torch.load(self.args.checkpoint, map_location=lambda storage, loc: storage)
+        predictor = self.create_predictor(P=EffDetPredictor, checkpoint=checkpoint)
+
+        ds = XRBBDataset(mode='effdet', target=self.a.target, size=predictor.image_size)
+        images = [i.image for i in ds.items]
+
+        pred_bbss = predictor.start(images=images)
+        gt_bbss = torch.stack([torch.from_numpy(i.bb.values) for i in ds.items])
+
+        results = self.draw_bbs(images, gt_bbss, 'blue')
+        results = self.draw_bbs(results, pred_bbss, 'yellow')
+
+        dest_dir = os.path.join('out', checkpoint.name, 'dataset')
+        os.makedirs(dest_dir, exist_ok=True)
+        for result, item in zip(results, ds.items):
+            result.save(os.path.join(dest_dir, f'{item.name}.jpg'))
+
+        print('done')
+
     def arg_map(self, parser):
         parser.add_argument('--checkpoint', '-c', required=True)
         parser.add_argument('--target', '-t', default='test', choices=['train', 'test'])
 
     def run_map(self):
-        ds = XRBBDataset(mode='effdet', target=self.a.target, size=self.image_size)
+        checkpoint = torch.load(self.args.checkpoint, map_location=lambda storage, loc: storage)
+        predictor = self.create_predictor(P=EffDetPredictor, checkpoint=checkpoint)
 
-        images = [i.image for i in ds.items]
-        bbss = self.detect_rois(images, self.image_size)
+        ds = XRBBDataset(mode='effdet', target=self.a.target, size=predictor.image_size)
 
-        for (bbs, item) in zip(bbss, ds.items):
-            print(bbs)
-            print(item.bb)
-            self.bbs = bbs
-            self.item = item
-            break
+        count = 2
+        images = [i.image for i in ds.items][:count]
+        items = ds.items[:count]
+
+
+        # bbss = torch.stack(bbss)
+        # gts = torch.stack([i.bb.values[:, :4] for i in ds.items])
+
+
+        pred_bbss = predictor.start(images=images)
+        gt_bbss = [torch.from_numpy(i.bb.values) for i in ds.items]
+
+        calc_aps(pred_bbss, gt_bbss)
+
 
 
 if __name__ == '__main__':
