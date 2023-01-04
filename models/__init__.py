@@ -47,24 +47,21 @@ def create_model(s):
 
 def create_det_model(name):
     if name == 'yolo':
-        return YOLOv3(), 512
+        return YOLOv3()
 
     if name == 'yolor':
-        return Yolor(num_classes=7), 512
+        return Yolor(num_classes=7)
 
     # if name == 'yolo5':
     #     # model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
     #     return Yolo5(cfg='cfg/yolov5s.yaml')
 
     if m := re.match(r'^effdet_d(\d)$', name):
-        depth = m[1]
-        cfg = get_efficientdet_config(f'tf_efficientdet_d{depth}')
+        cfg = get_efficientdet_config(f'tf_efficientdet_d{m[1]}')
         cfg.num_classes = 6
-        size = SIZE_BY_DEPTH[f'd{depth}']
-        return EfficientDet(cfg), size
+        return EfficientDet(cfg)
 
     if name == 'ssd':
-        return SSD300(n_classes=7), 512
+        return SSD300(n_classes=7)
 
     raise ValueError(f'Ivalid name: {name}')
-

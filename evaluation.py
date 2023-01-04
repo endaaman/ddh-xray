@@ -56,46 +56,38 @@ class CMD(TorchCommander):
 
         self.font = ImageFont.truetype('/usr/share/fonts/ubuntu/Ubuntu-L.ttf', 20)
 
+    def detect_rois(self, images, image_size):
+        scales = [torch.tensor(i.size)/image_size for i in images]
 
-    def detect_rois(self, imgs, image_size):
-        scales = [torch.tensor(i.size)/image_size for i in imgs]
-        imgs = [i.resize((image_size, image_size)) for i in imgs]
+        images = [i.resize((image_size, image_size)) for i in images]
 
-        transform_image = transforms.Compose([
+        transform_fn = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize([IMAGE_MEAN]*3, [IMAGE_STD]*3),
         ])
 
-        bs = self.args.batch_size
-        bbss = []
-        start = 0
-        idx = 0
-        t = tqdm(range(0, len(imgs), bs))
-        for start in t:
-            batch = imgs[start:start + bs]
+        def eval_fn(inputs):
+            return self.bench(inputs).detach().cpu()
 
-            inputs = torch.stack([transform_image(i) for i in batch]).to(self.device)
+        def collate_fn(pred, idx):
+            bbs = pred
+            bbs[:, 4] = bbs[:, 5]
+            bbs, missing = select_best_bbs(bbs)
+            if len(missing) > 0:
+                print(f'[{idx}] missing: {missing}')
+            # bbs: [[x0, y0, x1, y1, cls, index]]
+            bbs[:, 5] = idx
+            # (w, h) -> (w, w, h, h)
+            scale = scales[idx].repeat_interleave(2)
+            bbs[:, :4] *= scale
+            return bbs
 
-            with torch.no_grad():
-                batch_bbss = self.bench(inputs).detach().cpu()
-
-                batch_bbss[:, :, 4] = batch_bbss[:, :, 5]
-                for bbs in batch_bbss:
-                    bbs, missing = select_best_bbs(bbs)
-                    if len(missing) > 0:
-                        print(f'[{idx}] missing: {missing}')
-                    # bbs: [[x0, y0, x1, y1, cls, index]]
-                    bbs[:, 5] = idx
-                    # (w, h) -> (w, w, h, h)
-                    scale = scales[idx].repeat_interleave(2)
-                    bbs[:, :4] *= scale
-                    bbss.append(bbs)
-                    idx += 1
-
-            t.set_description(f'{start} ~ {start + bs} / {len(imgs)}')
-            t.refresh()
-
-        return bbss
+        return self.predict(
+            images=images,
+            transform_fn=transform_fn,
+            eval_fn=eval_fn,
+            collate_fn=collate_fn,
+        )
 
     def draw_bbs(self, imgs, bbss):
         results = []
@@ -110,28 +102,10 @@ class CMD(TorchCommander):
             results.append(img)
         return results
 
-    def arg_xr(self, parser):
+    def arg_detect(self, parser):
         parser.add_argument('--src', '-s', required=True)
 
-    def run_xr(self):
-        paths = get_paths_from_dir_or_file(self.a.src)
-        images = [Image(p) for p in paths]
-
-        bbss = self.detect_rois(images, self.image_size)
-        results = self.draw_bbs(images, bbss)
-
-        dest_dir = os.path.join('out', self.checkpoint.name, 'predict')
-        os.makedirs(dest_dir, exist_ok=True)
-        for result, path in zip(results, paths):
-            name = os.path.splitext(os.path.basename(path))[0]
-            result.save(os.path.join(dest_dir, f'{name}.jpg'))
-
-        print('done')
-
-    def arg_roi(self, parser):
-        parser.add_argument('--src', '-s', required=True)
-
-    def run_roi(self):
+    def run_detect(self):
         paths = get_paths_from_dir_or_file(self.a.src)
         images = [Image(p) for p in paths]
 
