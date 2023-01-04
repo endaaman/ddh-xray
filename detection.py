@@ -131,20 +131,16 @@ def calc_iou(a, b):
 
 
 def calc_aps(pred_bbss, gt_bbss):
-    iouss = []
-    # 画像ごと
-    entries = []
+    metric_fn = MetricBuilder.build_evaluation_metric('map_2d', async_mode=True, num_classes=7)
     for (pred_bbs, gt_bbs) in zip(pred_bbss, gt_bbss):
-        # ラベルごと
-        for label in LABEL_TO_STR:
-            preds = pred_bbs[pred_bbs[:, 4].long() == label][:, :4]
-            gts = gt_bbs[gt_bbs[:, 4].long() == label][:, :4]
-            # bbごとに同クラスのすべてのgt bbとiouを算出
-            for pred in preds:
-                a = pred.repeat(len(gts)).view(len(gts), -1)
-                ious = calc_iou(a, gts)
-            iouss.append(iou)
-    return iouss
+        # pred: [xmin, ymin, xmax, ymax, class_id, confidence]
+        # gt:   [xmin, ymin, xmax, ymax, class_id, difficult, crowd]
+        gt_bbs = np.append(gt_bbs, np.zeros([len(gt_bbs), 2]), axis=1) # append 2 cols
+        metric_fn.add(pred_bbs, gt_bbs)
+
+    print(f"VOC PASCAL mAP: {metric_fn.value(iou_thresholds=0.5, recall_thresholds=np.arange(0., 1.1, 0.1))['mAP']}")
+    print(f"VOC PASCAL mAP in all points: {metric_fn.value(iou_thresholds=0.5)['mAP']}")
+    print(f"COCO mAP: {metric_fn.value(iou_thresholds=np.arange(0.5, 0.95, 0.05), recall_thresholds=np.arange(0., 1.01, 0.01), mpolicy='soft')['mAP']}")
 
 
 
@@ -229,8 +225,8 @@ class CMD(TorchCommander):
         pred_bbss = predictor.start(images=images)
         gt_bbss = torch.stack([torch.from_numpy(i.bb.values) for i in ds.items])
 
-        results = self.draw_bbs(images, gt_bbss, 'blue')
-        results = self.draw_bbs(results, pred_bbss, 'yellow')
+        results = self.draw_bbs(images, gt_bbss, 'green')
+        results = self.draw_bbs(results, pred_bbss, 'red')
 
         dest_dir = os.path.join('out', checkpoint.name, 'dataset')
         os.makedirs(dest_dir, exist_ok=True)
@@ -249,17 +245,16 @@ class CMD(TorchCommander):
 
         ds = XRBBDataset(mode='effdet', target=self.a.target, size=predictor.image_size)
 
-        count = 2
-        images = [i.image for i in ds.items][:count]
-        items = ds.items[:count]
-
-
-        # bbss = torch.stack(bbss)
-        # gts = torch.stack([i.bb.values[:, :4] for i in ds.items])
-
+        images = [i.image for i in ds.items]
+        items = ds.items
+        #
+        # count = 4
+        # images = images[:count]
+        # items = items[:count]
 
         pred_bbss = predictor.start(images=images)
-        gt_bbss = [torch.from_numpy(i.bb.values) for i in ds.items]
+        pred_bbss = [p.numpy() for p in pred_bbss]
+        gt_bbss = [i.bb.values for i in items]
 
         calc_aps(pred_bbss, gt_bbss)
 
