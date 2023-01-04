@@ -14,7 +14,7 @@ from timm.scheduler.cosine_lr import CosineLRScheduler
 from endaaman.trainer import TrainCommander, Trainer
 from endaaman.metrics import BinaryAccuracy, BinaryAUC, BinaryRecall, BinarySpecificity
 
-from models import create_model
+from models import TimmModel
 from datasets import XRDataset, XRROIDataset
 
 
@@ -60,7 +60,7 @@ class CMD(TrainCommander):
         parser.add_argument('--size', type=int, default=768)
 
     def run_xr(self):
-        model = create_model(self.args.model)
+        model = TimmModel(name=self.args.model)
 
         loaders = [self.as_loader(XRDataset(
             size=self.args.size,
@@ -82,7 +82,7 @@ class CMD(TrainCommander):
     #     parser.add_argument('--size', type=int, default=512)
 
     def run_roi(self):
-        model = create_model(self.args.model)
+        model = TimmModel(name=self.args.model)
 
         loaders = [self.as_loader(XRROIDataset(
             size=(512, 256),

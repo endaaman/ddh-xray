@@ -136,7 +136,7 @@ def calc_aps(pred_bbss, gt_bbss):
         # pred: [xmin, ymin, xmax, ymax, class_id, confidence]
         # gt:   [xmin, ymin, xmax, ymax, class_id, difficult, crowd]
         gt_bbs = np.append(gt_bbs, np.zeros([len(gt_bbs), 2]), axis=1) # append 2 cols
-        metric_fn.add(pred_bbs, gt_bbs)
+        metric_fn.add(pred_bbs.round(), gt_bbs.round())
 
     print(f"VOC PASCAL mAP: {metric_fn.value(iou_thresholds=0.5, recall_thresholds=np.arange(0., 1.1, 0.1))['mAP']}")
     print(f"VOC PASCAL mAP in all points: {metric_fn.value(iou_thresholds=0.5)['mAP']}")

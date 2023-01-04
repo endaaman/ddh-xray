@@ -1,3 +1,4 @@
+# ported from: https://github.com/sgrvinod/a-PyTorch-Tutorial-to-Object-Detection
 from math import sqrt
 from itertools import product
 

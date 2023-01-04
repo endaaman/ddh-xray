@@ -20,8 +20,8 @@ import optuna
 
 from endaaman.torch import MLCommander
 
-from bench import LightGBMBench, XGBBench, SVMBench, NNBench
-from datasets.table import cols_cat, col_target, cols_feature, cols_extend, col_to_label
+from bench import LightGBMBench, SVMBench, NNBench
+from datasets import cols_cat, col_target, cols_feature, cols_extend, col_to_label
 
 
 optuna.logging.disable_default_handler()
@@ -116,10 +116,10 @@ class Table(MLCommander):
                 seed=args.seed,
                 imputer=args.imputer,
                 use_optuna=args.optuna),
-            'xgb': lambda: XGBBench(
-                num_folds=args.folds,
-                seed=args.seed,
-            ),
+            # 'xgb': lambda: XGBBench(
+            #     num_folds=args.folds,
+            #     seed=args.seed,
+            # ),
             'svm': lambda: SVMBench(
                 num_folds=args.folds,
                 seed=args.seed,
@@ -138,7 +138,7 @@ class Table(MLCommander):
         parser.add_argument('--no-show-fig', action='store_true')
         parser.add_argument('--folds', type=int, default=5)
         parser.add_argument('-i', '--imputer')
-        parser.add_argument('-m', '--models', default=['gbm'], nargs='+', choices=['gbm', 'xgb', 'svm', 'nn'])
+        parser.add_argument('-m', '--models', default=['gbm'], nargs='+', choices=['gbm', 'svm', 'nn'])
         parser.add_argument('-k', '--kernel', default='rbf')
         parser.add_argument('-g', '--gather', default='median', choices=['median', 'mean', 'reg'])
         parser.add_argument('-b', '--mean-by-bench', action='store_true')
@@ -291,8 +291,8 @@ class Table(MLCommander):
         # plt.subplots_adjust(left=0.125, bottom=0.1, right=0.9, top=0.9, wspace=0.2, hspace=0.2)
         # plt.tight_layout()
         plt.savefig(f'out/cm{self.args.suffix}.png')
-        if show_fig:
-            plt.show()
+        # if show_fig:
+        #     plt.show()
 
         output_path = f'out/output{self.args.suffix}.pt'
         torch.save(output, output_path)

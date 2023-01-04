@@ -1,10 +1,10 @@
-# ported from: https://github.com/sgrvinod/a-PyTorch-Tutorial-to-Object-Detection
 import torch
 import re
 import timm
 from torch import nn
 from torchvision import transforms, models
 from effdet import EfficientDet, get_efficientdet_config
+import torch.nn.functional as F
 
 from .ssd import SSD300
 from .yolo_v3 import YOLOv3
@@ -42,8 +42,35 @@ class TimmModel(nn.Module):
         return x
 
 
-def create_model(s):
-    return TimmModel(name=s, num_classes=1)
+class TimmModelWithMeasurement(nn.Module):
+    def __init__(self, name='tf_efficientnetv2_b0', num_measurement=10, num_classes=1, activation=True):
+        super().__init__()
+        self.num_classes = num_classes
+        self.activation = activation
+        self.base = timm.create_model(name, pretrained=True, num_classes=num_classes)
+        self.base.classifier = nn.Linear(self.base.classifier.in_features+num_measurement, num_classes)
+
+    def get_cam_layer(self):
+        return self.base.conv_head
+
+    def forward(self, x, measurement, activate=True):
+        x = self.base.forward_features(x)
+
+        x = self.base.global_pool(x)
+        if self.base.drop_rate > 0.:
+            x = F.dropout(x, p=self.base.drop_rate, training=self.base.training)
+
+        x = torch.cat([x, measurement], dim=1)
+        x = self.base.classifier(x)
+
+        if activate:
+            if self.num_classes > 1:
+                x = torch.softmax(x, dim=1)
+            else:
+                x = torch.sigmoid(x)
+
+        return x
+
 
 def create_det_model(name):
     if name == 'yolo':
@@ -65,3 +92,5 @@ def create_det_model(name):
         return SSD300(n_classes=7)
 
     raise ValueError(f'Ivalid name: {name}')
+
+

@@ -6,13 +6,12 @@ from sklearn.model_selection import StratifiedKFold, KFold
 from sklearn.impute import SimpleImputer, KNNImputer
 import lightgbm as org_lgb
 import optuna.integration.lightgbm as opt_lgb
-import xgboost as xgb
 import torch
 from torch import nn, optim
 from torch.utils.data import TensorDataset, DataLoader
 
 from endaaman import Timer
-from datasets.table import cols_feature
+from datasets import cols_feature
 
 class Bench:
     def __init__(self, num_folds, seed):
@@ -315,6 +314,7 @@ class NNBench(Bench):
 
     def _train(self, x_train, y_train, x_valid, y_valid, fold):
         model = NNModel(num_feature=x_train.shape[-1], num_classes=1)
+        print(x_train.shape)
         train_loader = self.as_loader(x_train, y_train)
         valid_loader = self.as_loader(x_valid, y_valid)
 
@@ -344,7 +344,7 @@ class NNBench(Bench):
             valid_loss = np.mean(losses)
             scheduler.step(valid_loss)
             lr = optimizer.param_groups[0]['lr']
-            if lr < 0.0000001:
+            if lr < 0.00001:
                 break
             e.set_description(f'[loss] train: {train_loss:.2f} val: {valid_loss:.2f} lr: {lr:.7f}')
             e.refresh()
