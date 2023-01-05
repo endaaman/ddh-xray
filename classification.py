@@ -8,17 +8,18 @@ from PIL import Image
 from sklearn import metrics
 import numpy as np
 import torch
-from torch import nn
-from torch import optim
+from torch import nn, optim
+from torch.utils.data import DataLoader
+from torchvision import transforms
 from timm.scheduler.cosine_lr import CosineLRScheduler
-from endaaman.torch import TorchCommander, Trainer
+from endaaman.torch import TorchCommander, Trainer, Predictor
 from endaaman.metrics import BinaryAccuracy, BinaryAUC, BinaryRecall, BinarySpecificity
 
-from models import create_model
+from models import create_model, TimmModelWithFeatures
 from datasets import XRDataset, XRROIDataset
 
 
-class T(Trainer):
+class MyTrainer(Trainer):
     def prepare(self, **kwargs):
         # self.criterion = FocalBCELoss(gamma=4.0)
         self.criterion = nn.BCELoss()
@@ -26,8 +27,10 @@ class T(Trainer):
 
     def create_scheduler(self, lr):
         return CosineLRScheduler(
-            self.optimizer, t_initial=100, lr_min=0.00001,
-            warmup_t=10, warmup_lr_init=0.00005, warmup_prefix=True)
+            self.optimizer,
+            warmup_t=5, t_initial=70,
+            warmup_lr_init=lr/2, lr_min=lr/100,
+            warmup_prefix=True)
 
     def hook_load_state(self, checkpoint):
         self.scheduler.step(checkpoint.epoch-1)
@@ -37,8 +40,9 @@ class T(Trainer):
 
     def eval(self, inputs, labels):
         if self.with_features:
-            inputs, feature = inputs
-            outputs = self.model(inputs.to(self.device), feature.to(self.device))
+            inputs, features = inputs
+            features.requires_grad = True
+            outputs = self.model(inputs.to(self.device), features.to(self.device))
         else:
             outputs = self.model(inputs.to(self.device))
         loss = self.criterion(outputs, labels.to(self.device))
@@ -57,33 +61,59 @@ class T(Trainer):
         }
 
 
+class MyPredictor(Predictor):
+    def prepare(self, **kwargs):
+        self.with_features = isinstance(self.model, TimmModelWithFeatures)
+
+    def create_model(self):
+        model = create_model(self.checkpoint.name)
+        model.load_state_dict(self.checkpoint.model_state)
+        return model.to(self.device).eval()
+
+    def eval(self, inputs):
+        if self.with_features:
+            inputs, features = inputs
+            return self.model(inputs.to(self.device), features.to(self.device)).detach().cpu()
+        return self.model(inputs.to(self.device)).detach().cpu()
+
+    def collate(self, pred, idx):
+        return pred.item()
+
+
 class CMD(TorchCommander):
     def arg_common(self, parser):
         parser.add_argument('--model', '-m', default='tf_efficientnetv2_b0')
 
     def arg_xr(self, parser):
         parser.add_argument('--size', type=int, default=768)
-        parser.add_argument('--with-features', '-f', action='store_true')
+        parser.add_argument('--features', '-f', type=int, default=0)
 
     def run_xr(self):
         name = self.args.model
-        if self.a.with_features:
+        with_features = False
+        if self.a.features == 1:
             name = f'{name}_f'
+            with_features = True
+        elif self.a.features == 2:
+            name = f'{name}_f2'
+            with_features = True
+        else:
+            raise RuntimeError(f'Invalid --features: {self.a.features}')
         model = create_model(name=name)
 
         loaders = [self.as_loader(XRDataset(
             size=self.args.size,
             target=t,
-            with_features=self.a.with_features,
+            with_features=with_features,
         )) for t in ['train', 'test']]
 
         trainer = self.create_trainer(
-            T=T,
-            name='xr_' + self.args.model,
+            T=MyTrainer,
+            name=name,
             model=model,
             loaders=loaders,
             log_dir='data/logs_xr',
-            with_features=self.a.with_features
+            with_features=with_features,
         )
 
         trainer.start(self.args.epoch, lr=self.args.lr)
@@ -93,7 +123,7 @@ class CMD(TorchCommander):
     #     parser.add_argument('--size', type=int, default=512)
 
     def run_roi(self):
-        model = TimmModel(name=self.args.model)
+        model = create_model(name=self.args.model)
 
         loaders = [self.as_loader(XRROIDataset(
             size=(512, 256),
@@ -102,7 +132,7 @@ class CMD(TorchCommander):
         )) for t in ['train', 'test']]
 
         trainer = self.create_trainer(
-            T=T,
+            T=MyTrainer,
             name='roi_' + self.args.model,
             model=model,
             loaders=loaders,
@@ -113,10 +143,30 @@ class CMD(TorchCommander):
         trainer.start(self.args.epoch, lr=self.args.lr)
 
 
+    def arg_ds(self, parser):
+        parser.add_argument('--checkpoint', '-c', required=True)
+        parser.add_argument('--target', '-t', default='test', choices=['train', 'test'])
+
+    def run_ds(self):
+        checkpoint = torch.load(self.args.checkpoint, map_location=lambda storage, loc: storage)
+        predictor = self.create_predictor(P=MyPredictor, checkpoint=checkpoint)
+
+        ds = XRDataset(target=self.a.target, size=768, with_features=predictor.with_features, aug_mode='test')
+        loader =DataLoader(dataset=ds, batch_size=self.a.batch_size, num_workers=1)
+
+        results = predictor.predict(loader=loader)
+
+        pred_y = np.array(results)
+        true_y = np.array([i.treatment for i in ds.items])
+        print(metrics.roc_auc_score(true_y, pred_y))
+
+        print('done')
+
+
 if __name__ == '__main__':
     cmd = CMD({
-        'epoch': 50,
-        'lr': 0.0001,
-        'batch_size': 32,
+        'epoch': 75,
+        'lr': 0.00002,
+        'batch_size': 16,
     })
     cmd.run()

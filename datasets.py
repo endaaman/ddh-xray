@@ -211,13 +211,13 @@ class SSDAdapter():
 
 
 class BaseDataset(Dataset): # pylint: disable=abstract-method
-    def __init__(self, target='train', test_ratio=-1, normalize_image=True, normalize_feature=True, seed=42):
+    def __init__(self, target='train', test_ratio=-1, aug_mode='same', normalize_image=True, normalize_feature=True, seed=42):
         self.target = target
         self.test_ratio = test_ratio
+        self.aug_mode = 'same'
         self.normalize_image = normalize_image
         self.normalize_feature = normalize_feature
         self.seed = seed
-
         self.df = self.load_df()
 
     def load_df(self):
@@ -253,17 +253,19 @@ class BaseDataset(Dataset): # pylint: disable=abstract-method
             'test': df_test,
         }[self.target]
 
-
-
     def create_augs(self, width, height):
-        augs = []
-        if self.target == 'train':
-            augs = [
+        augss = {
+            'train': [
                 A.RandomResizedCrop(width=width, height=height, scale=[0.8, 1.2]),
                 *BASE_AUGS
-            ]
-        else:
-            augs = [A.Resize(width=width, height=height)]
+            ],
+            'test': [A.Resize(width=width, height=height)],
+            'none': [],
+        }
+        augss['all'] = augss['test']
+        augss['same'] = augss[self.target]
+
+        augs = augss[self.aug_mode]
 
         if self.normalize_image:
             augs.append(A.Normalize(*[[v] * 3 for v in [IMAGE_MEAN, IMAGE_STD]]))
@@ -273,7 +275,7 @@ class BaseDataset(Dataset): # pylint: disable=abstract-method
 
 
 class XRBBDataset(BaseDataset):
-    def __init__(self, mode='default', size=512, **kwargs):
+    def __init__(self, mode='default', size=768, **kwargs):
         super().__init__(**kwargs)
 
         self.mode = mode
@@ -373,7 +375,7 @@ class ClsBaseDataset(BaseDataset):
         return x, y
 
 class XRDataset(ClsBaseDataset):
-    def __init__(self, size=512, **kwargs):
+    def __init__(self, size=768, **kwargs):
         super().__init__(**kwargs)
         self.items = self.load_items('data/images')
         self.albu = A.Compose(self.create_augs(size, size))
@@ -436,8 +438,6 @@ class C(Commander):
             i += 1
 
     def run_loader(self):
-        from torch.utils.data import DataLoader
-
         loader = DataLoader(
             dataset=self.ds,
             batch_size=2,

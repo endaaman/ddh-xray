@@ -11,8 +11,8 @@ import numpy as np
 import matplotlib
 from matplotlib import ticker, pyplot as plt
 import torch
-from torch import nn
-from torch import optim
+from torch import nn, optim
+from torch.utils.data import DataLoader
 from torchvision import transforms
 # from torch.utils.tensorboard import SummaryWriter
 from effdet import DetBenchTrain, DetBenchPredict
@@ -106,11 +106,11 @@ class EffDetPredictor(Predictor):
         # bbs[:, 5] = idx
         return bbs
 
-    def start(self, images):
+    def predict_images(self, images):
         scales = [torch.tensor(i.size)/self.image_size for i in images]
         images = [i.resize((self.image_size, self.image_size)) for i in images]
 
-        bbss = super().start(images)
+        bbss = super().predict_images(images)
         for bbs, scale in zip(bbss, scales):
             scale = scale.repeat_interleave(2)
             bbs[:, :4] *= scale
@@ -252,7 +252,7 @@ class CMD(TorchCommander):
         # images = images[:count]
         # items = items[:count]
 
-        pred_bbss = predictor.start(images=images)
+        pred_bbss = predictor.predict_images(images=images)
         pred_bbss = [p.numpy() for p in pred_bbss]
         gt_bbss = [i.bb.values for i in items]
 
