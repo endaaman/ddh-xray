@@ -42,25 +42,18 @@ LABEL_TO_STR = {
 }
 
 col_target = 'treatment'
+cols_clinical = ['female', 'breech_presentation']
 cols_measure = ['left_alpha', 'right_alpha', 'left_oe', 'right_oe', 'left_a', 'right_a', 'left_b', 'right_b', ]
 
-# cols_cat = ['female', 'family_history', 'breech_presentation', 'skin_laterality', 'limb_limitation']
-# cols_cat = ['female', 'family_history', 'skin_laterality', 'limb_limitation']
-# cols_val = ['left_alpha', 'right_alpha', 'left_oe', 'right_oe', 'left_a', 'right_a', 'left_b', 'right_b', ]
-
-cols_cat = []
-cols_val = ['female', 'breech_presentation'] + cols_measure
-# cols_val = ['female', 'breech_presentation'] + cols_measure
-
 do_abs = lambda x: np.power(x, 2)
-# do_abs = lambda x: x
 cols_extend = {
     # 'alpha_diff': lambda x: do_abs(x['left_alpha'] - x['right_alpha']),
     # 'oe_diff': lambda x: do_abs(x['left_oe'] - x['right_oe']),
     # 'a_diff': lambda x: do_abs(x['left_a'] - x['right_a']),
     # 'b_diff': lambda x: do_abs(x['left_b'] - x['right_b']),
 }
-cols_feature = cols_cat + cols_val + list(cols_extend.keys())
+
+cols_feature = cols_clinical + cols_measure + list(cols_extend.keys())
 
 col_to_label = {
     'female': 'Female',
@@ -137,6 +130,8 @@ def label_to_str(label):
 class ClsItem(NamedTuple):
     name: str
     image: ImageType
+    clinical: np.ndarray
+    measurement: np.ndarray
     treatment: bool
 
 class BBItem(NamedTuple):
@@ -158,7 +153,7 @@ def pad_to_fixed_size(img, size=(256, 128), bg=(0,0,0)):
         bg.paste(img, ((size[0] - new_width)//2, 0))
     return bg
 
-def pad_targets(bboxes, labels, size, fill=(0, 0)):
+def pad_bb(bboxes, labels, size, fill=(0, 0)):
     pad_bboxes = np.zeros([size, 4], dtype=bboxes.dtype)
     pad_labels = np.zeros([size], dtype=bboxes.dtype)
     if fill:
@@ -187,7 +182,7 @@ class EffDetAdaper():
     def __call__(self, images, bboxes, labels):
         # from xyxy to yxyx
         bboxes = bboxes[:, [1, 0, 3, 2]]
-        bboxes, labels = pad_targets(bboxes, labels, 6)
+        bboxes, labels = pad_bb(bboxes, labels, 6)
 
         labels = {
             'bbox': torch.FloatTensor(bboxes),
@@ -198,12 +193,11 @@ class EffDetAdaper():
 class YOLOAdapter():
     def __call__(self, images, bboxes, labels):
         bboxes = xyxy_to_xywh(bboxes, w=images.shape[2], h=images.shape[1])
-        bboxes, labels = pad_targets(bboxes, labels, 6, fill=(0, -1))
+        bboxes, labels = pad_bb(bboxes, labels, 6, fill=(0, -1))
         batches = np.zeros([6, 1])
         # yolo targets: [batch_idx, class_id, x, y, w, h]
         labels = np.concatenate([batches, labels[:, None], bboxes], axis=1)
         return images, torch.FloatTensor(labels)
-
 
 class SSDAdapter():
     def __call__(self, images, bboxes, labels):
@@ -217,16 +211,28 @@ class SSDAdapter():
 
 
 class BaseDataset(Dataset): # pylint: disable=abstract-method
-    def __init__(self, target='train', test_ratio=-1, normalized=True, seed=42):
+    def __init__(self, target='train', test_ratio=-1, normalize_image=True, normalize_feature=True, seed=42):
         self.target = target
         self.test_ratio = test_ratio
-        self.normalized = normalized
+        self.normalize_image = normalize_image
+        self.normalize_feature = normalize_feature
         self.seed = seed
 
         self.df = self.load_df()
 
     def load_df(self):
         df_all = pd.read_excel('data/table.xlsx', index_col=0, converters={'label': str})
+
+        df_measure = pd.read_excel('data/measurement_all.xlsx', converters={'label': str}, usecols=range(9))
+        df_measure['label'] = df_measure['label'].map('{:0>4}'.format)
+        df_measure = df_measure.set_index('label').fillna(0)
+
+        df_all = pd.merge(df_all, df_measure, left_index=True, right_index=True)
+
+        if self.normalize_feature:
+            for col in cols_measure:
+                t = df_all[col]
+                df_all[col] = (t - t.mean()) / t.std()
 
         if self.test_ratio > 0:
             df_train, df_test = train_test_split(
@@ -248,6 +254,7 @@ class BaseDataset(Dataset): # pylint: disable=abstract-method
         }[self.target]
 
 
+
     def create_augs(self, width, height):
         augs = []
         if self.target == 'train':
@@ -258,7 +265,7 @@ class BaseDataset(Dataset): # pylint: disable=abstract-method
         else:
             augs = [A.Resize(width=width, height=height)]
 
-        if self.normalized:
+        if self.normalize_image:
             augs.append(A.Normalize(*[[v] * 3 for v in [IMAGE_MEAN, IMAGE_STD]]))
         augs.append(ToTensorV2())
 
@@ -301,7 +308,7 @@ class XRBBDataset(BaseDataset):
 
         self.albu = A.ReplayCompose([
             *augs,
-            A.Normalize(*[[v] * 3 for v in [IMAGE_MEAN, IMAGE_STD]]) if self.normalized else None,
+            A.Normalize(*[[v] * 3 for v in [IMAGE_MEAN, IMAGE_STD]]) if self.normalize_image else None,
             ToTensorV2(),
         ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']))
 
@@ -310,14 +317,6 @@ class XRBBDataset(BaseDataset):
             if isinstance(t, A.HorizontalFlip):
                 self.horizontal_filpper_index = i
                 break
-
-    def validate_id(self):
-        for item in tqdm(self.items):
-            m = np.all(item.bb['id'].values == np.array([1, 2, 3, 4, 5, 6]))
-            if not m:
-                print(item.name)
-                print(item.bb)
-                print()
 
     def __len__(self):
         return len(self.items)
@@ -343,20 +342,22 @@ class XRBBDataset(BaseDataset):
         return self.adapter(images, bboxes, labels)
 
 
-
-class XRDataset(BaseDataset):
-    def __init__(self, size=512, **kwargs):
+class ClsBaseDataset(BaseDataset):
+    def __init__(self, with_features=False, **kwargs):
         super().__init__(**kwargs)
+        self.with_features = with_features
 
-        self.items = []
+    def load_items(self, base_dir):
+        items = []
         for idx, row in tqdm(self.df.iterrows(), leave=False, total=len(self.df)):
-            self.items.append(ClsItem(
+            items.append(ClsItem(
                 name=idx,
                 image=Image.open(f'data/images/{idx}.jpg').copy(),
+                clinical=row[cols_clinical],
+                measurement=row[cols_measure],
                 treatment=row.treatment))
         print(f'{self.target} images loaded')
-
-        self.albu = A.Compose(self.create_augs(size, size))
+        return items
 
     def __len__(self):
         return len(self.items)
@@ -365,59 +366,45 @@ class XRDataset(BaseDataset):
         item = self.items[idx]
         x = self.albu(image=np.array(item.image))['image']
         y = torch.FloatTensor([item.treatment])
+
+        if self.with_features:
+            feature = torch.from_numpy(pd.concat([item.clinical, item.measurement]).values).to(torch.float)
+            return (x, feature), y
         return x, y
+
+class XRDataset(ClsBaseDataset):
+    def __init__(self, size=512, **kwargs):
+        super().__init__(**kwargs)
+        self.items = self.load_items('data/images')
+        self.albu = A.Compose(self.create_augs(size, size))
 
 
 class XRROIDataset(BaseDataset):
     def __init__(self, base_dir='data/roi', size=(512, 256), **kwargs):
         super().__init__(**kwargs)
-
-        self.items = []
-        for idx, row in tqdm(self.df.index, leave=False, total=len(self.df)):
-            self.items.append(ClsItem(
-                name=idx,
-                image=Image.open(os.path.join(base_dir, f'{idx}.jpg')).copy(),
-                treatment=row.treatment))
-        print(f'{self.target} images loaded')
-
+        self.items = self.load_items(base_dir)
         self.albu = A.Compose(self.create_augs(size[0], size[1]))
 
-
-    def __getitem__(self, idx):
-        item = self.items[idx]
-        x = self.albu(image=np.array(item.image))['image']
-        y = torch.FloatTensor([item.treatment])
-        return x, y
-
-    # def __getitem__(self, idx):
-    #     item = self.items[idx]
-    #     image = item.image
-    #     vv = np.round(item.label.values[:, :4]).astype(np.int)
-    #     # top-left edge
-    #     left, top = np.min(vv[:, [0, 1]], axis=0)
-    #     # bottom-right edge
-    #     right, bottom = np.max(vv[:, [2, 3]], axis=0)
-    #     x = image.crop((left, top, right, bottom))
-    #     found = self.df[self.df['label'] == int(item.name)]
-    #
-    #     y = int(found['treatment'].values[0])
-    #     if self.augmentation:
-    #         x, y = self.augmentation(x, y)
-    #     # if y > 0:
-    #     #     x = ImageOps.invert(x)
-    #     return self.transform(x, y)
 
 
 class C(Commander):
     def arg_common(self, parser):
         parser.add_argument('--target', '-t', default='all', choices=['all', 'train', 'test'])
-        parser.add_argument('--mode', '-m', default='default', choices=['default', 'effdet', 'yolo', 'ssd'])
 
     def pre_common(self):
-        self.ds = XRBBDataset(
-            target=self.args.target,
-            mode=self.args.mode,
-        )
+        if self.a.function in ['bbs']:
+            self.ds = XRBBDataset(
+                target=self.args.target,
+                mode=self.args.mode,
+            )
+        else:
+            self.ds = XRDataset(
+                target=self.args.target,
+                with_features=True,
+            )
+
+    def arg_bbs(self, parser):
+        parser.add_argument('--mode', '-m', default='default', choices=['default', 'effdet', 'yolo', 'ssd'])
 
     def run_bbs(self):
         dest = f'out/bbs_{self.ds.target}'
@@ -427,6 +414,42 @@ class C(Commander):
             img = tensor_to_pil(img)
             ret = draw_bb(img, bb, {i:f'{l}' for i, l in enumerate(label) })
             ret.save(f'{dest}/{i}.jpg')
+
+    def arg_t(self, parser):
+        parser.add_argument('--index', '-i', type=int, default=0)
+        parser.add_argument('--id', '-d', type=str)
+
+    def run_t(self):
+        i = 0
+        for row in self.ds:
+            if self.a.function in ['bbs']:
+                self.x, self.y = row
+            else:
+                self.x, self.f, self.y = row
+            self.item = self.ds.items[i]
+            if self.a.id:
+                if self.a.id == self.item.id:
+                    break
+            else:
+                if self.a.index == i:
+                    break
+            i += 1
+
+    def run_loader(self):
+        from torch.utils.data import DataLoader
+
+        loader = DataLoader(
+            dataset=self.ds,
+            batch_size=2,
+            num_workers=1,
+        )
+
+        for ((a, b), c) in loader:
+            print(a.shape)
+            print(b.shape)
+            print(c.shape)
+            break
+
 
 
 if __name__ == '__main__':

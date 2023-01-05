@@ -11,10 +11,10 @@ import torch
 from torch import nn
 from torch import optim
 from timm.scheduler.cosine_lr import CosineLRScheduler
-from endaaman.trainer import TrainCommander, Trainer
+from endaaman.torch import TorchCommander, Trainer
 from endaaman.metrics import BinaryAccuracy, BinaryAUC, BinaryRecall, BinarySpecificity
 
-from models import TimmModel
+from models import create_model
 from datasets import XRDataset, XRROIDataset
 
 
@@ -22,6 +22,7 @@ class T(Trainer):
     def prepare(self, **kwargs):
         # self.criterion = FocalBCELoss(gamma=4.0)
         self.criterion = nn.BCELoss()
+        self.with_features = kwargs.get('with_features', False)
 
     def create_scheduler(self, lr):
         return CosineLRScheduler(
@@ -35,7 +36,11 @@ class T(Trainer):
         self.scheduler.step(self.current_epoch)
 
     def eval(self, inputs, labels):
-        outputs = self.model(inputs.to(self.device))
+        if self.with_features:
+            inputs, feature = inputs
+            outputs = self.model(inputs.to(self.device), feature.to(self.device))
+        else:
+            outputs = self.model(inputs.to(self.device))
         loss = self.criterion(outputs, labels.to(self.device))
         return loss, outputs
 
@@ -52,19 +57,24 @@ class T(Trainer):
         }
 
 
-class CMD(TrainCommander):
+class CMD(TorchCommander):
     def arg_common(self, parser):
         parser.add_argument('--model', '-m', default='tf_efficientnetv2_b0')
 
     def arg_xr(self, parser):
         parser.add_argument('--size', type=int, default=768)
+        parser.add_argument('--with-features', '-f', action='store_true')
 
     def run_xr(self):
-        model = TimmModel(name=self.args.model)
+        name = self.args.model
+        if self.a.with_features:
+            name = f'{name}_f'
+        model = create_model(name=name)
 
         loaders = [self.as_loader(XRDataset(
             size=self.args.size,
             target=t,
+            with_features=self.a.with_features,
         )) for t in ['train', 'test']]
 
         trainer = self.create_trainer(
@@ -73,6 +83,7 @@ class CMD(TrainCommander):
             model=model,
             loaders=loaders,
             log_dir='data/logs_xr',
+            with_features=self.a.with_features
         )
 
         trainer.start(self.args.epoch, lr=self.args.lr)
@@ -87,6 +98,7 @@ class CMD(TrainCommander):
         loaders = [self.as_loader(XRROIDataset(
             size=(512, 256),
             target=t,
+            with_features=self.a.with_features,
         )) for t in ['train', 'test']]
 
         trainer = self.create_trainer(
@@ -95,6 +107,7 @@ class CMD(TrainCommander):
             model=model,
             loaders=loaders,
             log_dir='data/logs_roi',
+            with_features=self.a.with_features
         )
 
         trainer.start(self.args.epoch, lr=self.args.lr)

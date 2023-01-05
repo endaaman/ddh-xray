@@ -42,13 +42,13 @@ class TimmModel(nn.Module):
         return x
 
 
-class TimmModelWithMeasurement(nn.Module):
+class TimmModelWithFeatures(nn.Module):
     def __init__(self, name='tf_efficientnetv2_b0', num_measurement=10, num_classes=1, activation=True):
         super().__init__()
         self.num_classes = num_classes
         self.activation = activation
         self.base = timm.create_model(name, pretrained=True, num_classes=num_classes)
-        self.base.classifier = nn.Linear(self.base.classifier.in_features+num_measurement, num_classes)
+        self.classifier = nn.Linear(self.base.classifier.in_features+num_measurement, num_classes)
 
     def get_cam_layer(self):
         return self.base.conv_head
@@ -61,15 +61,19 @@ class TimmModelWithMeasurement(nn.Module):
             x = F.dropout(x, p=self.base.drop_rate, training=self.base.training)
 
         x = torch.cat([x, measurement], dim=1)
-        x = self.base.classifier(x)
+        x = self.classifier(x)
 
         if activate:
             if self.num_classes > 1:
                 x = torch.softmax(x, dim=1)
             else:
                 x = torch.sigmoid(x)
-
         return x
+
+def create_model(name):
+    if m := re.match(r'(^.*)_f$', name):
+        return TimmModelWithFeatures(m[1])
+    return TimmModel(name)
 
 
 def create_det_model(name):
