@@ -14,7 +14,7 @@ from torch import optim
 from torchvision import transforms
 
 from effdet import DetBenchPredict
-from endaaman import get_paths_from_dir_or_file
+from endaaman import get_image_paths_from_dir_or_file
 from endaaman.torch import TorchCommander
 
 from models import create_det_model
@@ -106,7 +106,7 @@ class CMD(TorchCommander):
         parser.add_argument('--src', '-s', required=True)
 
     def run_detect(self):
-        paths = get_paths_from_dir_or_file(self.a.src)
+        paths = get_image_paths_from_dir_or_file(self.a.src)
         images = [Image(p) for p in paths]
 
         bbss = self.detect_rois(images, self.image_size)

@@ -20,7 +20,7 @@ from ptflops import get_model_complexity_info
 from timm.scheduler import CosineLRScheduler
 from mean_average_precision import MetricBuilder
 
-from endaaman import get_paths_from_dir_or_file
+from endaaman import get_image_paths_from_dir_or_file
 from endaaman.torch import TorchCommander, Trainer, Predictor
 
 from datasets import XRBBDataset, LABEL_TO_STR, IMAGE_STD, IMAGE_MEAN
@@ -33,6 +33,9 @@ from models.ssd import MultiBoxLoss
 class EffDetTrainer(Trainer):
     def prepare(self, **kwargs):
         self.bench = DetBenchTrain(self.model).to(self.device)
+
+    def create_model(self):
+        return create_det_model(self.model_name)
 
     def create_scheduler(self, lr):
         return CosineLRScheduler(
@@ -89,7 +92,7 @@ class EffDetPredictor(Predictor):
         ])
 
     def create_model(self):
-        model = create_det_model(self.checkpoint.name)
+        model = create_det_model(self.checkpoint.model_name)
         model.load_state_dict(self.checkpoint.model_state)
         return model.eval()
 
@@ -161,18 +164,15 @@ class CMD(TorchCommander):
 
     def run_train(self):
         name = f'effdet_{self.a.depth}'
-        model = create_det_model(name)
-        size = SIZE_BY_DEPTH[self.a.depth]
-        loaders = self.create_loaders(mode='effdet', size=size)
+        loaders = self.create_loaders(mode='effdet', size=SIZE_BY_DEPTH[self.a.depth])
 
         trainer = self.create_trainer(
             T=EffDetTrainer,
-            name=name,
-            model=model,
+            model_name=name,
             loaders=loaders,
         )
 
-        self.start(trainer)
+        trainer.start(self.args.epoch, lr=self.args.lr)
 
 
     def draw_bbs(self, imgs, bbss, color='yellow'):
@@ -196,7 +196,7 @@ class CMD(TorchCommander):
         checkpoint = torch.load(self.args.checkpoint, map_location=lambda storage, loc: storage)
         predictor = self.create_predictor(P=EffDetPredictor, checkpoint=checkpoint)
 
-        paths = get_paths_from_dir_or_file(self.a.src)
+        paths = get_image_paths_from_dir_or_file(self.a.src)
         images = [Image.open(p) for p in paths]
 
         bbss = predictor.start(images=images)
@@ -238,6 +238,7 @@ class CMD(TorchCommander):
     def arg_map(self, parser):
         parser.add_argument('--checkpoint', '-c', required=True)
         parser.add_argument('--target', '-t', default='test', choices=['train', 'test'])
+        parser.add_argument('--length', '-l', type=int, default=-1)
 
     def run_map(self):
         checkpoint = torch.load(self.args.checkpoint, map_location=lambda storage, loc: storage)
@@ -247,16 +248,32 @@ class CMD(TorchCommander):
 
         images = [i.image for i in ds.items]
         items = ds.items
-        #
-        # count = 4
-        # images = images[:count]
-        # items = items[:count]
+
+        images = images[:self.a.length]
+        items = items[:self.a.length]
 
         pred_bbss = predictor.predict_images(images=images)
         pred_bbss = [p.numpy() for p in pred_bbss]
         gt_bbss = [i.bb.values for i in items]
 
         calc_aps(pred_bbss, gt_bbss)
+
+    def arg_crop(self, parser):
+        parser.add_argument('--checkpoint', '-c', required=True)
+        parser.add_argument('--length', '-l', type=int, default=-1)
+
+    def run_crop(self):
+        checkpoint = torch.load(self.args.checkpoint, map_location=lambda storage, loc: storage)
+        predictor = self.create_predictor(P=EffDetPredictor, checkpoint=checkpoint)
+        ds = XRBBDataset(mode='effdet', target='all', size=predictor.image_size)
+
+        images = images=[i.image for i in ds.items]
+        pred_bbss = predictor.predict_images(images)
+        pred_bbss = [p.numpy() for p in pred_bbss]
+
+        for image, pred_bbs in zip(images, pred_bbss):
+            print(pred_bbs)
+            break
 
 
 

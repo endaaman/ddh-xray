@@ -25,6 +25,9 @@ class MyTrainer(Trainer):
         self.criterion = nn.BCELoss()
         self.with_features = kwargs.get('with_features', False)
 
+    def create_model(self):
+        return create_model(self.model_name)
+
     def create_scheduler(self, lr):
         return CosineLRScheduler(
             self.optimizer,
@@ -66,7 +69,7 @@ class MyPredictor(Predictor):
         self.with_features = isinstance(self.model, TimmModelWithFeatures)
 
     def create_model(self):
-        model = create_model(self.checkpoint.name)
+        model = create_model(self.checkpoint.model_name)
         model.load_state_dict(self.checkpoint.model_state)
         return model.to(self.device).eval()
 
@@ -99,7 +102,6 @@ class CMD(TorchCommander):
             with_features = True
         else:
             raise RuntimeError(f'Invalid --features: {self.a.features}')
-        model = create_model(name=name)
 
         loaders = [self.as_loader(XRDataset(
             size=self.args.size,
@@ -109,9 +111,9 @@ class CMD(TorchCommander):
 
         trainer = self.create_trainer(
             T=MyTrainer,
-            name=name,
-            model=model,
+            model_name=name,
             loaders=loaders,
+            trainer_name=f'xr_{name}',
             log_dir='data/logs_xr',
             with_features=with_features,
         )
@@ -123,8 +125,6 @@ class CMD(TorchCommander):
     #     parser.add_argument('--size', type=int, default=512)
 
     def run_roi(self):
-        model = create_model(name=self.args.model)
-
         loaders = [self.as_loader(XRROIDataset(
             size=(512, 256),
             target=t,
@@ -133,9 +133,9 @@ class CMD(TorchCommander):
 
         trainer = self.create_trainer(
             T=MyTrainer,
-            name='roi_' + self.args.model,
-            model=model,
+            model_name=self.args.model,
             loaders=loaders,
+            trainer_name='roi_' + self.args.model,
             log_dir='data/logs_roi',
             with_features=self.a.with_features
         )

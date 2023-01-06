@@ -24,7 +24,7 @@ from torchvision.utils import draw_bounding_boxes
 import albumentations as A
 from albumentations.pytorch.transforms import ToTensorV2
 
-from endaaman import Commander
+from endaaman import Commander, pad_to_size
 from endaaman.torch import pil_to_tensor, tensor_to_pil
 
 from utils import  draw_bb
@@ -43,6 +43,9 @@ LABEL_TO_STR = {
 
 col_target = 'treatment'
 cols_clinical = ['female', 'breech_presentation']
+# cols_cat = ['female', 'family_history', 'breech_presentation', 'skin_laterality', 'limb_limitation']
+# cols_cat = ['female', 'family_history', 'skin_laterality', 'limb_limitation']
+
 cols_measure = ['left_alpha', 'right_alpha', 'left_oe', 'right_oe', 'left_a', 'right_a', 'left_b', 'right_b', ]
 
 do_abs = lambda x: np.power(x, 2)
@@ -128,6 +131,7 @@ def label_to_str(label):
 
 
 class ClsItem(NamedTuple):
+    test: bool
     name: str
     image: ImageType
     clinical: np.ndarray
@@ -135,23 +139,11 @@ class ClsItem(NamedTuple):
     treatment: bool
 
 class BBItem(NamedTuple):
+    test: bool
     name: str
     image: ImageType
     bb: pd.DataFrame
 
-
-def pad_to_fixed_size(img, size=(256, 128), bg=(0,0,0)):
-    is_wide = img.width / img.height > 2
-    bg = Image.new('RGB', size, bg)
-    if is_wide:
-        new_height = round(img.height * size[0] / img.width)
-        img = img.resize((size[0], new_height))
-        bg.paste(img, (0, (size[1] - new_height)//2))
-    else:
-        new_width = round(img.width * size[1] / img.height)
-        img = img.resize((new_width, size[1]))
-        bg.paste(img, ((size[0] - new_width)//2, 0))
-    return bg
 
 def pad_bb(bboxes, labels, size, fill=(0, 0)):
     pad_bboxes = np.zeros([size, 4], dtype=bboxes.dtype)
@@ -288,16 +280,15 @@ class XRBBDataset(BaseDataset):
         }[mode]
 
         self.items = []
-        for idx in tqdm(self.df.index, leave=False, total=len(self.df)):
+        for idx, row in tqdm(self.df.iterrows(), leave=False, total=len(self.df)):
             image_path = f'data/images/{idx}.jpg'
             label_path = f'data/labels/{idx}.txt'
             self.items.append(BBItem(
+                test=row.test,
                 name=idx,
                 image=Image.open(image_path),
                 bb=read_label_as_df(label_path)))
         print(f'{self.target} images loaded')
-
-        self.horizontal_filpper_index = None
 
         if self.target == 'train':
             augs = [
@@ -349,16 +340,17 @@ class ClsBaseDataset(BaseDataset):
         super().__init__(**kwargs)
         self.with_features = with_features
 
-    def load_items(self, base_dir):
+    def load_items(self, base_dir='data/images'):
         items = []
         for idx, row in tqdm(self.df.iterrows(), leave=False, total=len(self.df)):
             items.append(ClsItem(
+                test=row.test,
                 name=idx,
-                image=Image.open(f'data/images/{idx}.jpg').copy(),
+                image=Image.open(os.path.join(base_dir, f'{idx}.jpg')).copy(),
                 clinical=row[cols_clinical],
                 measurement=row[cols_measure],
                 treatment=row.treatment))
-        print(f'{self.target} images loaded')
+        print(f'{self.target} images loaded from {base_dir}')
         return items
 
     def __len__(self):
@@ -377,38 +369,45 @@ class ClsBaseDataset(BaseDataset):
 class XRDataset(ClsBaseDataset):
     def __init__(self, size=768, **kwargs):
         super().__init__(**kwargs)
-        self.items = self.load_items('data/images')
+        self.items = self.load_items(base_dir='data/images')
         self.albu = A.Compose(self.create_augs(size, size))
 
 
-class XRROIDataset(BaseDataset):
-    def __init__(self, base_dir='data/roi', size=(512, 256), **kwargs):
+class XRROIDataset(ClsBaseDataset):
+    def __init__(self, base_dir='data/rois/gt', size=(512, 256), **kwargs):
         super().__init__(**kwargs)
-        self.items = self.load_items(base_dir)
+        self.items = self.load_items(base_dir=base_dir)
         self.albu = A.Compose(self.create_augs(size[0], size[1]))
-
 
 
 class C(Commander):
     def arg_common(self, parser):
         parser.add_argument('--target', '-t', default='all', choices=['all', 'train', 'test'])
+        parser.add_argument('--with-features', '-f', action='store_true')
 
-    def pre_common(self):
-        if self.a.function in ['bbs']:
-            self.ds = XRBBDataset(
+    def create_dataset(self, target='xr'):
+        if target == 'xr':
+            return XRDataset(
+                target=self.args.target,
+                with_features=self.a.with_features,
+            )
+        if target == 'roi':
+            return XRROIDataset(
+                target=self.args.target,
+                with_features=self.a.with_features,
+            )
+        if target == 'bb':
+            return XRBBDataset(
                 target=self.args.target,
                 mode=self.args.mode,
             )
-        else:
-            self.ds = XRDataset(
-                target=self.args.target,
-                with_features=True,
-            )
+        raise RuntimeError(f'Invalid dataset type: {target}')
 
     def arg_bbs(self, parser):
         parser.add_argument('--mode', '-m', default='default', choices=['default', 'effdet', 'yolo', 'ssd'])
 
     def run_bbs(self):
+        self.ds = self.create_dataset('bb')
         dest = f'out/bbs_{self.ds.target}'
         os.makedirs(dest, exist_ok=True)
         for i, (img, bb, label) in tqdm(enumerate(self.ds), total=len(self.ds)):
@@ -418,16 +417,18 @@ class C(Commander):
             ret.save(f'{dest}/{i}.jpg')
 
     def arg_t(self, parser):
+        parser.add_argument('--dataset', '-d', default='xr')
         parser.add_argument('--index', '-i', type=int, default=0)
-        parser.add_argument('--id', '-d', type=str)
+        parser.add_argument('--id', type=str)
 
     def run_t(self):
+        self.ds = self.create_dataset(self.a.dataset)
         i = 0
-        for row in self.ds:
-            if self.a.function in ['bbs']:
-                self.x, self.y = row
+        for pack in self.ds:
+            if self.a.with_features:
+                (self.x, self.f), self.y = pack
             else:
-                self.x, self.f, self.y = row
+                self.x, self.y = pack
             self.item = self.ds.items[i]
             if self.a.id:
                 if self.a.id == self.item.id:
@@ -438,6 +439,7 @@ class C(Commander):
             i += 1
 
     def run_loader(self):
+        self.ds = self.create_dataset(self.a.dataset)
         loader = DataLoader(
             dataset=self.ds,
             batch_size=2,
@@ -450,8 +452,6 @@ class C(Commander):
             print(c.shape)
             break
 
-
-
 if __name__ == '__main__':
-    c = C()
-    c.run()
+    cmd = C()
+    cmd.run()
