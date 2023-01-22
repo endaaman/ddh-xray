@@ -24,8 +24,6 @@ class MyTrainer(Trainer):
         # self.criterion = FocalBCELoss(gamma=4.0)
         self.criterion = nn.BCELoss()
         self.with_features = kwargs.get('with_features', False)
-
-    def create_model(self):
         return create_model(self.model_name)
 
     def create_scheduler(self, lr):
