@@ -21,16 +21,18 @@ from datasets import XRDataset, XRROIDataset
 
 class MyTrainer(Trainer):
     def prepare(self, **kwargs):
+        self.with_features = kwargs.pop('with_features', False)
+        assert len(kwargs) == 0
         # self.criterion = FocalBCELoss(gamma=4.0)
         self.criterion = nn.BCELoss()
         self.with_features = kwargs.get('with_features', False)
         return create_model(self.model_name)
 
-    def create_scheduler(self, lr):
+    def create_scheduler(self, lr, max_epoch):
         return CosineLRScheduler(
             self.optimizer,
-            warmup_t=5, t_initial=70,
-            warmup_lr_init=lr/2, lr_min=lr/100,
+            warmup_t=0, t_initial=max_epoch,
+            warmup_lr_init=lr/2, lr_min=lr/10,
             warmup_prefix=True)
 
     def hook_load_state(self, checkpoint):
@@ -65,8 +67,6 @@ class MyTrainer(Trainer):
 class MyPredictor(Predictor):
     def prepare(self, **kwargs):
         self.with_features = isinstance(self.model, TimmModelWithFeatures)
-
-    def create_model(self):
         model = create_model(self.checkpoint.model_name)
         model.load_state_dict(self.checkpoint.model_state)
         return model.to(self.device).eval()
@@ -87,7 +87,7 @@ class CMD(TorchCommander):
 
     def arg_xr(self, parser):
         parser.add_argument('--size', type=int, default=768)
-        parser.add_argument('--features', '-f', type=int, default=0)
+        parser.add_argument('--features', '-f', type=int, default=0, choices=[0, 1, 2])
 
     def run_xr(self):
         name = self.args.model
@@ -98,14 +98,13 @@ class CMD(TorchCommander):
         elif self.a.features == 2:
             name = f'{name}_f2'
             with_features = True
-        else:
-            raise RuntimeError(f'Invalid --features: {self.a.features}')
 
-        loaders = [self.as_loader(XRDataset(
+        loaders = self.as_loaders(*[XRDataset(
             size=self.args.size,
             target=t,
             with_features=with_features,
-        )) for t in ['train', 'test']]
+        ) for t in ['train', 'test']])
+
 
         trainer = self.create_trainer(
             T=MyTrainer,
@@ -163,8 +162,8 @@ class CMD(TorchCommander):
 
 if __name__ == '__main__':
     cmd = CMD({
-        'epoch': 75,
-        'lr': 0.00002,
-        'batch_size': 16,
+        'epoch': 100,
+        'lr': 0.0001,
+        'batch_size': 4,
     })
     cmd.run()
