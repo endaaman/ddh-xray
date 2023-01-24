@@ -25,7 +25,6 @@ class MyTrainer(Trainer):
         assert len(kwargs) == 0
         # self.criterion = FocalBCELoss(gamma=4.0)
         self.criterion = nn.BCELoss()
-        self.with_features = kwargs.get('with_features', False)
         return create_model(self.model_name)
 
     def create_scheduler(self, lr, max_epoch):
@@ -84,57 +83,59 @@ class MyPredictor(Predictor):
 class CMD(TorchCommander):
     def arg_common(self, parser):
         parser.add_argument('--model', '-m', default='tf_efficientnetv2_b0')
+        parser.add_argument('--features', '-f', type=int, default=0, choices=[0, 1, 2])
 
     def arg_xr(self, parser):
         parser.add_argument('--size', type=int, default=768)
-        parser.add_argument('--features', '-f', type=int, default=0, choices=[0, 1, 2])
 
-    def run_xr(self):
+    def get_model_name(self):
         name = self.args.model
-        with_features = False
         if self.a.features == 1:
             name = f'{name}_f'
-            with_features = True
         elif self.a.features == 2:
             name = f'{name}_f2'
-            with_features = True
+        return name
 
+    def run_xr(self):
         loaders = self.as_loaders(*[XRDataset(
             size=self.args.size,
             target=t,
-            with_features=with_features,
+            with_features=self.a.features > 0,
         ) for t in ['train', 'test']])
 
-
+        name = self.get_model_name()
         trainer = self.create_trainer(
             T=MyTrainer,
             model_name=name,
             loaders=loaders,
             trainer_name=f'xr_{name}',
             log_dir='data/logs_xr',
-            with_features=with_features,
+            with_features=self.a.features > 0,
         )
 
         trainer.start(self.args.epoch, lr=self.args.lr)
 
 
-    # def arg_roi(self, parser):
-    #     parser.add_argument('--size', type=int, default=512)
+    def arg_roi(self, parser):
+        parser.add_argument('--size', type=int, default=512)
+        parser.add_argument('--base-dir', '-d', default='data/rois/gt')
 
     def run_roi(self):
-        loaders = [self.as_loader(XRROIDataset(
-            size=(512, 256),
+        loaders = self.as_loaders(*[XRROIDataset(
+            base_dir=self.a.base_dir,
+            size=(self.a.size, self.a.size),
             target=t,
-            with_features=self.a.with_features,
-        )) for t in ['train', 'test']]
+            with_features=self.a.features > 0,
+        ) for t in ['train', 'test']])
 
+        name = self.get_model_name()
         trainer = self.create_trainer(
             T=MyTrainer,
-            model_name=self.args.model,
+            model_name=name,
             loaders=loaders,
-            trainer_name='roi_' + self.args.model,
+            trainer_name='roi_' + name,
             log_dir='data/logs_roi',
-            with_features=self.a.with_features
+            with_features=self.a.features > 0,
         )
 
         trainer.start(self.args.epoch, lr=self.args.lr)

@@ -4,8 +4,7 @@ import numpy as np
 from sklearn.svm import SVR
 from sklearn.model_selection import StratifiedKFold, KFold
 from sklearn.impute import SimpleImputer, KNNImputer
-import lightgbm as org_lgb
-import optuna.integration.lightgbm as opt_lgb
+import lightgbm as lgb
 import torch
 from torch import nn, optim
 from torch.utils.data import TensorDataset, DataLoader
@@ -74,35 +73,26 @@ class Bench:
 
 
 class LightGBMBench(Bench):
-    def __init__(self, imputer=None, use_optuna=False, *args, **kwargs):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.lgb = opt_lgb if use_optuna else org_lgb
-        if imputer:
-            self.imputer = {
-                'simple': SimpleImputer(missing_values=np.nan, strategy='median'),
-                'knn': KNNImputer(n_neighbors=5),
-                'none': None,
-            }[imputer]
-        else:
-            self.imputer = None
-        self.df_feature_importance = pd.DataFrame()
+        self.df_importances = []
 
     def preprocess(self, x, y=None):
         # label smoothing
         return x, y
 
     def train(self, df_train, target_col):
-        r = super().train(df_train, target_col)
 
-        df_tmp = self.df_feature_importance.groupby('feature').agg('mean').reset_index()
-        df_tmp = df_tmp.sort_values('importance', ascending=False)
+        self.df_importance = []
+        super().train(df_train, target_col)
+
+        self.df_importance = pd.concat(self.df_importances, axis=0) \
+            .groupby('feature').agg('mean').reset_index() \
+            .sort_values('importance', ascending=False)
 
         print('IMPORTANCE')
-        print(df_tmp[['feature', 'importance']])
-        # df_tmp.to_excel('out/imp_split.xlsx')
-        df_tmp.to_excel('out/imp_gain.xlsx')
-
-        return r
+        print(self.df_importance[['feature', 'importance']])
+        self.df_importance.to_excel('out/imp_gain.xlsx')
 
     def _train(self, x_train, y_train, x_valid, y_valid, fold):
         gbm_params = {
@@ -116,19 +106,22 @@ class LightGBMBench(Bench):
             'verbosity': -1,
         }
 
-        train_data = self.lgb.Dataset(x_train, label=y_train, categorical_feature=[])
+        train_data = lgb.Dataset(x_train, label=y_train, categorical_feature=[])
         valid_sets = [train_data]
         if np.any(x_valid):
-            valid_data = self.lgb.Dataset(x_valid, label=y_valid, categorical_feature=[])
+            valid_data = lgb.Dataset(x_valid, label=y_valid, categorical_feature=[])
             valid_sets += [valid_data]
 
-        model = self.lgb.train(
+        model = lgb.train(
             gbm_params, # モデルのパラメータ
             train_data, # 学習データ
-            1000, # 学習を繰り返す最大epoch数, epoch = モデルの学習回数
+            num_boost_round=10000,  # 最大学習サイクル数。early_stopping使用時は大きな値を入力
             valid_sets=valid_sets,
-            verbose_eval=200,
-            early_stopping_rounds=150,
+            # early_stopping_rounds=150,
+            callbacks=[
+                lgb.early_stopping(stopping_rounds=10, verbose=False),
+                lgb.log_evaluation(False)
+            ],
             categorical_feature=[],
         )
 
@@ -136,8 +129,7 @@ class LightGBMBench(Bench):
         tmp['feature'] = cols_feature
         tmp['importance'] = model.feature_importance(importance_type='gain')
         # tmp['importance'] = model.feature_importance(importance_type='split')
-        tmp['fold'] = fold + 1
-        self.df_feature_importance = pd.concat([self.df_feature_importance, tmp], axis=0)
+        self.df_importances.append(tmp)
 
         return model
 
@@ -151,7 +143,7 @@ class LightGBMBench(Bench):
     def restore(self, data):
         self.models = []
         for m in data:
-            self.models.append(self.lgb.Booster(model_str=m))
+            self.models.append(lgb.Booster(model_str=m))
 
 
 class XGBBench(Bench):
@@ -191,20 +183,11 @@ class XGBBench(Bench):
         pass
 
 class SVMBench(Bench):
-    def __init__(self, imputer='simple', svm_kernel='rbf', *args, **kwargs):
+    def __init__(self, svm_kernel='rbf', *args, **kwargs):
         super().__init__(*args, **kwargs)
-        imputer = imputer or 'simple'
-        self.imputer = {
-            'simple': SimpleImputer(missing_values=np.nan, strategy='median'),
-            'knn': KNNImputer(n_neighbors=5),
-            'none': None,
-        }[imputer]
         self.svm_kernel = svm_kernel
 
     def preprocess(self, x, y=None):
-        if self.imputer:
-            self.imputer.fit(x)
-            x = self.imputer.transform(x)
         x[np.isnan(x)] = -1
         return x, y
 
@@ -314,7 +297,6 @@ class NNBench(Bench):
 
     def _train(self, x_train, y_train, x_valid, y_valid, fold):
         model = NNModel(num_feature=x_train.shape[-1], num_classes=1)
-        print(x_train.shape)
         train_loader = self.as_loader(x_train, y_train)
         valid_loader = self.as_loader(x_valid, y_valid)
 

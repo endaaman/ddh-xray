@@ -16,15 +16,12 @@ import scipy.stats as st
 from sklearn import metrics
 from sklearn.model_selection import StratifiedKFold, KFold, train_test_split
 from sklearn.linear_model import LogisticRegression, LinearRegression
-import optuna
 
 from endaaman.torch import MLCommander
 
 from bench import LightGBMBench, SVMBench, NNBench
-from datasets import cols_cat, col_target, cols_feature, cols_extend, col_to_label
+from datasets import col_target, cols_feature, cols_extend, col_to_label
 
-
-optuna.logging.disable_default_handler()
 
 
 def fill_by_opposite(df):
@@ -44,16 +41,16 @@ def fill_by_opposite(df):
 class Table(MLCommander):
     def arg_common(self, parser):
         parser.add_argument('-r', '--test-ratio', type=float)
-        parser.add_argument('-o', '--optuna', action='store_true')
         parser.add_argument('--dropna', action='store_true')
         parser.add_argument('--a-flip', action='store_true')
         parser.add_argument('--a-fill', action='store_true')
 
     def pre_common(self):
         df_table = pd.read_excel('data/table.xlsx', index_col=0) #len:765
-        df_measure = pd.read_excel('data/measurement_all.xlsx', index_col=0) #len:763
-
-        df_all = df_table.merge(df_measure,left_index=True, right_index=True, how='outer')
+        sheet = 'old'
+        # sheet = 'filled'
+        df_measure = pd.read_excel('data/measurement_all.xlsx', index_col=0, sheet_name=sheet) #len:763
+        df_all = df_table.merge(df_measure,left_index=True, right_index=True, how='inner')
 
         if self.args.dropna:
             df_all = df_all.dropna()
@@ -72,8 +69,8 @@ class Table(MLCommander):
             df_train['test'] = 0
             df_test['test'] = 1
         else:
-            df_train = df_all[df_all['test'] == 0]
-            df_test = df_all[df_all['test'] == 1]
+            df_train = df_all[df_all['test'] < 1]
+            df_test = df_all[df_all['test'] > 0]
 
 
         df_table_ind = pd.read_excel('data/table_independent.xlsx', index_col=0)
@@ -113,9 +110,7 @@ class Table(MLCommander):
         t = {
             'gbm': lambda: LightGBMBench(
                 num_folds=args.folds,
-                seed=args.seed,
-                imputer=args.imputer,
-                use_optuna=args.optuna),
+                seed=args.seed),
             # 'xgb': lambda: XGBBench(
             #     num_folds=args.folds,
             #     seed=args.seed,
@@ -123,7 +118,6 @@ class Table(MLCommander):
             'svm': lambda: SVMBench(
                 num_folds=args.folds,
                 seed=args.seed,
-                imputer=args.imputer,
                 svm_kernel=args.kernel,
             ),
             'nn': lambda: NNBench(
@@ -137,7 +131,6 @@ class Table(MLCommander):
     def arg_train(self, parser):
         parser.add_argument('--no-show-fig', action='store_true')
         parser.add_argument('--folds', type=int, default=5)
-        parser.add_argument('-i', '--imputer')
         parser.add_argument('-m', '--models', default=['gbm'], nargs='+', choices=['gbm', 'svm', 'nn'])
         parser.add_argument('-k', '--kernel', default='rbf')
         parser.add_argument('-g', '--gather', default='median', choices=['median', 'mean', 'reg'])
