@@ -31,8 +31,8 @@ class MyTrainer(Trainer):
     def create_scheduler(self, lr, max_epoch):
         return CosineLRScheduler(
             self.optimizer,
-            warmup_t=0, t_initial=max_epoch,
-            warmup_lr_init=lr/2, lr_min=lr/10,
+            warmup_t=5, t_initial=max_epoch,
+            warmup_lr_init=lr/2, lr_min=lr/100,
             warmup_prefix=True)
 
     def hook_load_state(self, checkpoint):
@@ -85,6 +85,7 @@ class CMD(TorchCommander):
     def arg_common(self, parser):
         parser.add_argument('--model', '-m', default='tf_efficientnetv2_b0')
         parser.add_argument('--features', '-f', type=int, default=0, choices=[0, 1, 2])
+        parser.add_argument('--test-ratio', '-r', type=float, default=-1)
 
     def arg_xr(self, parser):
         parser.add_argument('--size', type=int, default=768)
@@ -100,6 +101,7 @@ class CMD(TorchCommander):
     def run_xr(self):
         loaders = self.as_loaders(*[XRDataset(
             size=self.args.size,
+            test_ratio=self.a.test_ratio,
             target=t,
         ) for t in ['train', 'test']])
 
@@ -122,7 +124,7 @@ class CMD(TorchCommander):
     def run_roi(self):
         loaders = self.as_loaders(*[XRROIDataset(
             base_dir=self.a.base_dir,
-            size=(self.a.size, self.a.size),
+            size=(self.a.size, self.a.size//2),
             target=t,
         ) for t in ['train', 'test']])
 
@@ -147,7 +149,7 @@ class CMD(TorchCommander):
         predictor = self.create_predictor(P=MyPredictor, checkpoint=checkpoint)
 
         ds = XRDataset(target=self.a.target, size=768, with_features=predictor.with_features, aug_mode='test')
-        loader =DataLoader(dataset=ds, batch_size=self.a.batch_size, num_workers=1)
+        loader = DataLoader(dataset=ds, batch_size=self.a.batch_size, num_workers=1)
 
         results = predictor.predict(loader=loader)
 
@@ -160,7 +162,7 @@ class CMD(TorchCommander):
 
 if __name__ == '__main__':
     cmd = CMD({
-        'epoch': 100,
+        'epoch': 50,
         'lr': 0.0001,
         'batch_size': 4,
     })
