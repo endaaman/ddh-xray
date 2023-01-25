@@ -21,11 +21,12 @@ from datasets import XRDataset, XRROIDataset
 
 class MyTrainer(Trainer):
     def prepare(self, **kwargs):
-        self.with_features = kwargs.pop('with_features', False)
-        assert len(kwargs) == 0
         # self.criterion = FocalBCELoss(gamma=4.0)
         self.criterion = nn.BCELoss()
-        return create_model(self.model_name)
+
+        model =  create_model(self.model_name)
+        self.with_features = isinstance(model, TimmModelWithFeatures)
+        return model
 
     def create_scheduler(self, lr, max_epoch):
         return CosineLRScheduler(
@@ -100,7 +101,6 @@ class CMD(TorchCommander):
         loaders = self.as_loaders(*[XRDataset(
             size=self.args.size,
             target=t,
-            with_features=self.a.features > 0,
         ) for t in ['train', 'test']])
 
         name = self.get_model_name()
@@ -110,7 +110,6 @@ class CMD(TorchCommander):
             loaders=loaders,
             trainer_name=f'xr_{name}',
             log_dir='data/logs_xr',
-            with_features=self.a.features > 0,
         )
 
         trainer.start(self.args.epoch, lr=self.args.lr)
@@ -125,7 +124,6 @@ class CMD(TorchCommander):
             base_dir=self.a.base_dir,
             size=(self.a.size, self.a.size),
             target=t,
-            with_features=self.a.features > 0,
         ) for t in ['train', 'test']])
 
         name = self.get_model_name()
@@ -135,7 +133,6 @@ class CMD(TorchCommander):
             loaders=loaders,
             trainer_name='roi_' + name,
             log_dir='data/logs_roi',
-            with_features=self.a.features > 0,
         )
 
         trainer.start(self.args.epoch, lr=self.args.lr)

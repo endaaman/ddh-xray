@@ -48,8 +48,8 @@ class Table(MLCommander):
     def pre_common(self):
         df_table = pd.read_excel('data/table.xlsx', index_col=0) #len:765
         sheet = 'old'
-        # sheet = 'filled'
-        df_measure = pd.read_excel('data/measurement_all.xlsx', index_col=0, sheet_name=sheet) #len:763
+        sheet = 'filled'
+        df_measure = pd.read_excel('data/measurement_all.xlsx', index_col=0, sheet_name=sheet) #len:764
         df_all = df_table.merge(df_measure,left_index=True, right_index=True, how='inner')
 
         if self.args.dropna:
