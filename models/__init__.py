@@ -27,7 +27,7 @@ class TimmModel(nn.Module):
         super().__init__()
         self.num_classes = num_classes
         self.activation = activation
-        self.base = timm.create_model(name, pretrained=True, num_classes=num_classes)
+        self.base = timm.create_model(name, pretrained=True, in_chans=1, num_classes=num_classes)
 
     def get_cam_layer(self):
         return self.base.conv_head
@@ -43,29 +43,31 @@ class TimmModel(nn.Module):
 
 
 class TimmModelWithFeatures(nn.Module):
-    def __init__(self, name='tf_efficientnetv2_b0', num_features=10, single_cls=True, num_classes=1, activation=True):
+    def __init__(self, name='tf_efficientnetv2_b0', num_features=10, num_clss=0, num_classes=1, activation=True):
         super().__init__()
         self.num_classes = num_classes
         self.activation = activation
-        self.single_cls = single_cls
+        self.num_clss = num_clss
 
-        if self.single_cls:
+        self.base = timm.create_model(name, pretrained=True, in_chans=1, num_classes=num_classes)
+
+        if self.num_clss == 1:
             # 1-classifier
-            self.base = timm.create_model(name, pretrained=True, num_classes=num_classes)
             self.classifier = nn.Linear(self.base.classifier.in_features+num_features, num_classes)
-        else:
+        elif self.num_clss == 2:
             # 2-classifier
-            num_cnn_features = 10
-            self.base = timm.create_model(name, pretrained=True, num_classes=num_cnn_features)
+            print('2 cls')
             self.classifier = nn.Sequential(
-                nn.Linear(num_cnn_features + num_features, num_classes),
+                nn.Linear(num_classes + num_features, num_classes),
             )
+        else:
+            raise RuntimeError(f'Invalid num_clss: {self.num_clss}')
 
     def get_cam_layer(self):
         return self.base.conv_head
 
     def forward(self, x, num_features, activate=True):
-        if self.single_cls:
+        if self.num_clss == 1:
             # 1-classifier
             x = self.base.forward_features(x)
             x = self.base.global_pool(x)
@@ -73,7 +75,7 @@ class TimmModelWithFeatures(nn.Module):
                 x = F.dropout(x, p=self.base.drop_rate, training=self.base.training)
             x = torch.cat([x, num_features], dim=1)
             x = self.classifier(x)
-        else:
+        elif self.num_clss == 2:
             # 2-classifier
             x = self.base(x)
             x = torch.cat([x, num_features], dim=1)
@@ -87,11 +89,8 @@ class TimmModelWithFeatures(nn.Module):
         return x
 
 def create_model(name):
-    if m := re.match(r'(^.*)_f$', name):
-        return TimmModelWithFeatures(m[1], single_cls=False)
-
-    if m := re.match(r'(^.*)_f2$', name):
-        return TimmModelWithFeatures(m[1], single_cls=False)
+    if m := re.match(r'(^.*)_f(\d)$', name):
+        return TimmModelWithFeatures(m[1], num_clss=int(m[2]))
     return TimmModel(name)
 
 

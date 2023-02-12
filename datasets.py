@@ -245,26 +245,6 @@ class BaseDataset(Dataset): # pylint: disable=abstract-method
             'test': df_test,
         }[self.target]
 
-    def create_augs(self, width, height):
-        augss = {
-            'train': [
-                A.RandomResizedCrop(width=width, height=height, scale=[0.8, 1.2]),
-                *BASE_AUGS
-            ],
-            'test': [A.Resize(width=width, height=height)],
-            'none': [],
-        }
-        augss['all'] = augss['test']
-        augss['same'] = augss[self.target]
-
-        augs = augss[self.aug_mode]
-
-        if self.normalize_image:
-            augs.append(A.Normalize(*[[v] * 3 for v in [IMAGE_MEAN, IMAGE_STD]]))
-        augs.append(ToTensorV2())
-
-        return augs
-
 
 class XRBBDataset(BaseDataset):
     def __init__(self, mode='default', size=768, **kwargs):
@@ -294,7 +274,7 @@ class XRBBDataset(BaseDataset):
             augs = [
                 A.Resize(width=size, height=size),
                 A.RandomResizedCrop(width=size, height=size, scale=[0.8, 1.2]),
-                *BASE_AUGS
+                *BASE_AUGS,
             ]
         else:
             augs = [A.Resize(width=size, height=size)]
@@ -356,18 +336,44 @@ class ClsBaseDataset(BaseDataset):
     def __len__(self):
         return len(self.items)
 
+    def create_augs(self, width, height):
+        augss = {
+            'train': [
+                A.RandomResizedCrop(width=512, height=512, scale=[0.8, 1.2]),
+                # A.RandomCrop(width=512, height=512),
+                *BASE_AUGS,
+            ],
+            'test': [
+                # A.Resize(width=width, height=height),
+                A.CenterCrop(width=512, height=512),
+            ],
+            'none': [],
+        }
+        augss['all'] = augss['test']
+        augss['same'] = augss[self.target]
+
+        augs = augss[self.aug_mode]
+
+        if self.normalize_image:
+            augs.append(A.Normalize(*[[v] * 3 for v in [IMAGE_MEAN, IMAGE_STD]]))
+        augs.append(A.ToGray(p=1))
+        augs.append(ToTensorV2())
+        return augs
+
     def __getitem__(self, idx):
         item = self.items[idx]
         x = self.albu(image=np.array(item.image))['image']
         y = torch.FloatTensor([item.treatment])
 
+        x = x.mean(dim=0)[None, ...]
         if self.with_features:
             feature = torch.from_numpy(pd.concat([item.clinical, item.measurement]).values).to(torch.float)
             return (x, feature), y
         return x, y
 
+
 class XRDataset(ClsBaseDataset):
-    def __init__(self, size=768, **kwargs):
+    def __init__(self, size=512, **kwargs):
         super().__init__(**kwargs)
         self.items = self.load_items(base_dir='data/images')
         self.albu = A.Compose(self.create_augs(size, size))

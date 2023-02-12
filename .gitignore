@@ -4,4 +4,5 @@ weights/
 out/
 log/
 tmp/
+runs/
 lightning_logs/
