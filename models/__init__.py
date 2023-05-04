@@ -2,9 +2,9 @@ import torch
 import re
 import timm
 from torch import nn
+import torch.nn.functional as F
 from torchvision import transforms, models
 from effdet import EfficientDet, get_efficientdet_config
-import torch.nn.functional as F
 
 from .ssd import SSD300
 from .yolo_v3 import YOLOv3
@@ -114,5 +114,3 @@ def create_det_model(name):
         return SSD300(n_classes=7)
 
     raise ValueError(f'Ivalid name: {name}')
-
-
