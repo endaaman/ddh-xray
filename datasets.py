@@ -25,7 +25,7 @@ import albumentations as A
 from albumentations.pytorch.transforms import ToTensorV2
 
 from endaaman import Commander, pad_to_size
-from endaaman.torch import pil_to_tensor, tensor_to_pil
+from endaaman.ml import pil_to_tensor, tensor_to_pil
 
 from utils import  draw_bb
 
@@ -201,9 +201,9 @@ class SSDAdapter():
         # labels = [l for l in labels]
         return images, (torch.from_numpy(bboxes), torch.from_numpy(labels))
 
-
-class BaseDataset(Dataset): # pylint: disable=abstract-method
-    def __init__(self, target='train', test_ratio=-1, aug_mode='same', normalize_image=True, normalize_feature=True, seed=42):
+# pylint: disable=abstract-method
+class BaseDataset(Dataset):
+    def __init__(self, target, test_ratio=-1, aug_mode='same', normalize_image=True, normalize_feature=True, seed=42):
         self.target = target
         self.test_ratio = test_ratio
         self.aug_mode = 'same'
@@ -247,7 +247,7 @@ class BaseDataset(Dataset): # pylint: disable=abstract-method
 
 
 class XRBBDataset(BaseDataset):
-    def __init__(self, mode='default', size=768, **kwargs):
+    def __init__(self, size, mode='default', **kwargs):
         super().__init__(**kwargs)
 
         self.mode = mode
@@ -272,7 +272,7 @@ class XRBBDataset(BaseDataset):
 
         if self.target == 'train':
             augs = [
-                A.Resize(width=size, height=size),
+                # A.Resize(width=size, height=size),
                 A.RandomResizedCrop(width=size, height=size, scale=[0.8, 1.2]),
                 *BASE_AUGS,
             ]
