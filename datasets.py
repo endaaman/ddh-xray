@@ -27,7 +27,7 @@ from albumentations.pytorch.transforms import ToTensorV2
 from endaaman import Commander, pad_to_size
 from endaaman.ml import pil_to_tensor, tensor_to_pil
 
-from utils import  draw_bb
+from utils import draw_bb
 
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -42,8 +42,8 @@ LABEL_TO_STR = {
 }
 
 col_target = 'treatment'
-cols_clinical = ['female', 'breech_presentation']
-# cols_cat = ['female', 'family_history', 'breech_presentation', 'skin_laterality', 'limb_limitation']
+# cols_clinical = ['female', 'breech_presentation']
+cols_clinical = ['female', 'breech_presentation', 'family_history', 'skin_laterality', 'limb_limitation']
 # cols_cat = ['female', 'family_history', 'skin_laterality', 'limb_limitation']
 
 cols_measure = ['left_alpha', 'right_alpha', 'left_oe', 'right_oe', 'left_a', 'right_a', 'left_b', 'right_b', ]
@@ -56,7 +56,7 @@ cols_extend = {
     # 'b_diff': lambda x: do_abs(x['left_b'] - x['right_b']),
 }
 
-cols_feature = cols_clinical + cols_measure + list(cols_extend.keys())
+cols_feature = cols_measure + list(cols_extend.keys()) + cols_clinical
 
 col_to_label = {
     'female': 'Female',
@@ -316,9 +316,9 @@ class XRBBDataset(BaseDataset):
 
 
 class ClsBaseDataset(BaseDataset):
-    def __init__(self, with_features=False, **kwargs):
+    def __init__(self, num_features=0, **kwargs):
         super().__init__(**kwargs)
-        self.with_features = with_features
+        self.num_features = num_features
 
     def load_items(self, base_dir='data/images'):
         items = []
@@ -339,13 +339,13 @@ class ClsBaseDataset(BaseDataset):
     def create_augs(self, width, height):
         augss = {
             'train': [
-                A.RandomResizedCrop(width=512, height=512, scale=[0.8, 1.2]),
+                A.RandomResizedCrop(width=width, height=height, scale=[0.8, 1.2]),
                 # A.RandomCrop(width=512, height=512),
                 *BASE_AUGS,
             ],
             'test': [
-                # A.Resize(width=width, height=height),
-                A.CenterCrop(width=512, height=512),
+                A.Resize(width=width, height=height),
+                # A.CenterCrop(width=width, height=height),
             ],
             'none': [],
         }
@@ -366,9 +366,10 @@ class ClsBaseDataset(BaseDataset):
         y = torch.FloatTensor([item.treatment])
 
         x = x.mean(dim=0)[None, ...]
-        if self.with_features:
-            feature = torch.from_numpy(pd.concat([item.clinical, item.measurement]).values).to(torch.float)
-            return (x, feature), y
+        if self.num_features > 0:
+            v = pd.concat([item.measurement, item.clinical]).values[:self.num_features]
+            features = torch.from_numpy(v).to(torch.float)
+            return (x, features), y
         return x, y
 
 

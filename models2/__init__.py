@@ -23,10 +23,9 @@ SIZE_BY_DEPTH = {
 }
 
 class TimmModel(nn.Module):
-    def __init__(self, name='tf_efficientnetv2_b0', num_classes=1, activation=True):
+    def __init__(self, name='tf_efficientnetv2_b0', num_classes=1):
         super().__init__()
         self.num_classes = num_classes
-        self.activation = activation
         self.base = timm.create_model(name, pretrained=True, in_chans=1, num_classes=num_classes)
 
     def get_cam_layer(self):
@@ -43,55 +42,31 @@ class TimmModel(nn.Module):
 
 
 class TimmModelWithFeatures(nn.Module):
-    def __init__(self, name='tf_efficientnetv2_b0', num_features=10, num_clss=0, num_classes=1, activation=True):
+    def __init__(self, name='tf_efficientnetv2_b0', num_features=10, num_classes=1):
         super().__init__()
         self.num_classes = num_classes
-        self.activation = activation
-        self.num_clss = num_clss
-
+        self.num_features = num_features
         self.base = timm.create_model(name, pretrained=True, in_chans=1, num_classes=num_classes)
-
-        if self.num_clss == 1:
-            # 1-classifier
-            self.classifier = nn.Linear(self.base.classifier.in_features+num_features, num_classes)
-        elif self.num_clss == 2:
-            # 2-classifier
-            print('2 cls')
-            self.classifier = nn.Sequential(
-                nn.Linear(num_classes + num_features, num_classes),
-            )
-        else:
-            raise RuntimeError(f'Invalid num_clss: {self.num_clss}')
+        self.fc = nn.Linear(
+            in_features=self.base.classifier.in_features+num_features,
+            out_features=num_classes
+        )
 
     def get_cam_layer(self):
         return self.base.conv_head
 
-    def forward(self, x, num_features, activate=True):
-        if self.num_clss == 1:
-            # 1-classifier
-            x = self.base.forward_features(x)
-            x = self.base.global_pool(x)
-            if self.base.drop_rate > 0.:
-                x = F.dropout(x, p=self.base.drop_rate, training=self.base.training)
-            x = torch.cat([x, num_features], dim=1)
-            x = self.classifier(x)
-        elif self.num_clss == 2:
-            # 2-classifier
-            x = self.base(x)
-            x = torch.cat([x, num_features], dim=1)
-            x = self.classifier(x)
-
+    def forward(self, x, features, activate=True):
+        x = self.base.forward_features(x)
+        x = self.base.forward_head(x, pre_logits=True)
+        if self.num_features > 0 and features is not None:
+            x = torch.cat([x, features])
+        x = self.fc(x)
         if activate:
             if self.num_classes > 1:
                 x = torch.softmax(x, dim=1)
             else:
                 x = torch.sigmoid(x)
         return x
-
-def create_model(name):
-    if m := re.match(r'(^.*)_f(\d)$', name):
-        return TimmModelWithFeatures(m[1], num_clss=int(m[2]))
-    return TimmModel(name)
 
 
 def create_det_model(name):
