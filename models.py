@@ -1,5 +1,5 @@
-import torch
 import re
+import torch
 import timm
 from torch import nn
 import torch.nn.functional as F
@@ -48,7 +48,7 @@ class TimmModelWithFeatures(nn.Module):
         self.num_features = num_features
         self.base = timm.create_model(name, pretrained=True, in_chans=1, num_classes=num_classes)
         self.fc = nn.Linear(
-            in_features=self.base.classifier.in_features + num_features,
+            in_features=self.base.num_features + num_features,
             out_features=num_classes
         )
 

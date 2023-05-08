@@ -70,7 +70,7 @@ class CLI(BaseMLCLI):
         num_features:int = Field(0, cli=('--features', '-f'))
         batch_size: int = Field(8, cli=('--batch-size', '-B'))
         size:int = 512
-        name:str = '{}'
+        suffix:str = ''
         epoch:int = 20
 
     def run_train(self, a:TrainArgs):
@@ -88,7 +88,7 @@ class CLI(BaseMLCLI):
             lr=a.lr,
             size=a.size,
         )
-        name = a.name.format(a.model_name)
+        name = f'{a.model_name}_{a.suffix}' if a.suffix else a.model_name
         trainer = Trainer(
             config=config,
             out_dir=f'out/classification/{a.num_features}/{name}',
