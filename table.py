@@ -12,15 +12,16 @@ from torch import nn
 import pandas as pd
 from tqdm import tqdm
 import scipy.stats as st
+from pydantic import Field
 
 from sklearn import metrics
 from sklearn.model_selection import StratifiedKFold, KFold, train_test_split
 from sklearn.linear_model import LogisticRegression, LinearRegression
 
-from endaaman.torch import MLCommander
+from endaaman.ml import BaseMLCLI
 
 from bench import LightGBMBench, SVMBench, NNBench
-from datasets import col_target, cols_feature, cols_extend, col_to_label
+from common import load_data, col_target, cols_feature, cols_extend, col_to_label
 
 
 
@@ -38,40 +39,16 @@ def fill_by_opposite(df):
                 df[f'left_{v}'][i] = df[f'right_{v}'][i]
                 # print(f'fill: [{i}] left {v}')
 
-class Table(MLCommander):
-    def arg_common(self, parser):
-        parser.add_argument('-r', '--test-ratio', type=float)
-        parser.add_argument('--dropna', action='store_true')
-        parser.add_argument('--a-flip', action='store_true')
-        parser.add_argument('--a-fill', action='store_true')
+class CLI(BaseMLCLI):
+    class CommonArgs(BaseMLCLI.CommonArgs):
+        test_ratio:float = Field(-1, cli=('-r', '--test-ratio', ))
+        normalize:float = Field(False, cli=('--normalize', ))
 
-    def pre_common(self):
-        df_table = pd.read_excel('data/table.xlsx', index_col=0) #len:765
-        sheet = 'old'
-        sheet = 'filled'
-        df_measure = pd.read_excel('data/measurement_all.xlsx', index_col=0, sheet_name=sheet) #len:764
-        df_all = df_table.merge(df_measure,left_index=True, right_index=True, how='inner')
-
-        if self.args.dropna:
-            df_all = df_all.dropna()
-
-        # for col, fn in cols_extend.items():
-        #     print(col, fn)
-        #     df_all[col] = fn(df_all)
-
-        if self.args.test_ratio:
-            df_train, df_test = train_test_split(
-                df_all,
-                test_size=self.args.test_ratio,
-                random_state=self.args.seed,
-                stratify=df_all['treatment'])
-
-            df_train['test'] = 0
-            df_test['test'] = 1
-        else:
-            df_train = df_all[df_all['test'] < 1]
-            df_test = df_all[df_all['test'] > 0]
-
+    def pre_common(self, a:CommonArgs):
+        dfs = load_data(test_ratio=a.test_ratio, normalize_features=a.normalize, seed=a.seed)
+        df_all = dfs['all']
+        df_train = dfs['train']
+        df_test = dfs['test']
 
         df_table_ind = pd.read_excel('data/table_independent.xlsx', index_col=0)
         df_measure_ind = pd.read_excel('data/measurement_independent.xlsx', index_col=0)
@@ -79,20 +56,8 @@ class Table(MLCommander):
 
         df_manual = pd.read_excel('data/manual_ind.xlsx', index_col=0)
 
-        if self.args.a_fill:
-            fill_by_opposite(df_train)
-            fill_by_opposite(df_test)
-            fill_by_opposite(df_ind)
-
-        if self.args.a_flip:
-            df_train_mirror = df_train.copy()
-            df_train_mirror[['left_a', 'right_a']] = df_train[['right_a', 'left_a']]
-            df_train_mirror[['left_b', 'right_b']] = df_train[['right_b', 'left_b']]
-            df_train_mirror[['left_oe', 'right_oe']] = df_train[['right_oe', 'left_oe']]
-            df_train_mirror[['left_alpha', 'right_alpha']] = df_train[['right_alpha', 'left_alpha']]
-            df_train = pd.concat([df_train, df_train_mirror])
-
         t = cols_feature + [col_target]
+        print(t)
         self.df_all = df_all[t]
         self.df_train = df_train[t]
         self.df_test = df_test[t]
@@ -102,47 +67,45 @@ class Table(MLCommander):
         # self.meta_model = LogisticRegression()
         self.meta_model = LinearRegression()
 
-    def run_demo(self):
+    def run_demo(self, a:CommonArgs):
         print(len(self.df_test))
         print(len(self.df_train))
 
-    def create_benchs_by_args(self, args):
-        t = {
+    def create_benchs(self, models:list[str], num_folds, seed):
+        factory = {
             'gbm': lambda: LightGBMBench(
-                num_folds=args.folds,
-                seed=args.seed),
-            # 'xgb': lambda: XGBBench(
-            #     num_folds=args.folds,
-            #     seed=args.seed,
-            # ),
+                num_folds=num_folds,
+                seed=seed),
             'svm': lambda: SVMBench(
-                num_folds=args.folds,
-                seed=args.seed,
-                svm_kernel=args.kernel,
+                num_folds=num_folds,
+                seed=seed,
+                svm_kernel='rbf',
             ),
             'nn': lambda: NNBench(
-                num_folds=args.folds,
-                seed=args.seed,
+                num_folds=num_folds,
+                seed=seed,
                 epoch=200,
             ),
         }
-        return [t[m]() for m in args.models]
+        return [factory[m]() for m in models]
 
-    def arg_train(self, parser):
-        parser.add_argument('--no-show-fig', action='store_true')
-        parser.add_argument('--folds', type=int, default=5)
-        parser.add_argument('-m', '--models', default=['gbm'], nargs='+', choices=['gbm', 'svm', 'nn'])
-        parser.add_argument('-k', '--kernel', default='rbf')
-        parser.add_argument('-g', '--gather', default='median', choices=['median', 'mean', 'reg'])
-        parser.add_argument('-b', '--mean-by-bench', action='store_true')
+    class TrainArgs(CommonArgs):
+        no_show_fig:bool = Field(False, cli=('--no-show-fig', ))
+        num_folds:int = Field(5, cli=('--folds', ))
+        models_base:str = Field('gbm', cli=('--models', '-m'), choices=['gbm', 'svm', 'nn'])
+        gather:str = 'median' # choices=['median', 'mean', 'reg']
+
+        @property
+        def models(self):
+            return self.models_base.split('_')
 
     def predict_benchs(self, benchs, x):
-        if self.args.mean_by_bench:
-            return np.stack([np.mean(b.predict(x), axis=1) for b in benchs], axis=1)
+        # if self.args.mean_by_bench:
+        #     return np.stack([np.mean(b.predict(x), axis=1) for b in benchs], axis=1)
         return np.concatenate([b.predict(x) for b in benchs], axis=1)
 
-    def run_train(self):
-        benchs = self.create_benchs_by_args(self.args)
+    def run_train(self, a:TrainArgs):
+        benchs = self.create_benchs(a.models, a.num_folds, a.seed)
 
         for b in benchs:
             b.train(self.df_train, col_target)
@@ -150,10 +113,12 @@ class Table(MLCommander):
         # p = f'out/model{self.self.args.suffix}.txt'
         # model.save_model(p)
         checkpoint = {
-            'args': self.args,
+            'args': self.a.dict(),
             'model_data': [b.serialize() for b in benchs],
         }
-        p = f'out/model{self.args.suffix}.pth'
+        code = '_'.join(sorted(a.models))
+        p = f'out/tables/{code}.pth'
+        os.makedirs('out/tables', exist_ok=True)
         torch.save(checkpoint, p)
         print(f'wrote {p}')
 
@@ -166,9 +131,9 @@ class Table(MLCommander):
             print(type(b).__name__, 'train %.2f pred %.2f' % (b.training_time, b.predicting_time))
         print()
 
-        self.evaluate(benchs, not self.args.no_show_fig)
+        self.evaluate(benchs, not a.no_show_fig, a.gather)
 
-    def evaluate(self, benchs, show_fig):
+    def evaluate(self, benchs, show_fig, gather):
         data = {
             'train': {
                 'x': self.df_train[cols_feature],
@@ -190,14 +155,14 @@ class Table(MLCommander):
 
         for (t, v) in data.items():
             preds = self.predict_benchs(benchs, v['x'])
-            if self.args.gather == 'median':
+            if gather == 'median':
                 pred = np.median(preds, axis=1)
-            elif self.args.gather == 'mean':
+            elif gather == 'mean':
                 pred = np.mean(preds, axis=1)
-            elif self.args.gather == 'reg':
+            elif gather == 'reg':
                 pred = self.meta_model.predict(preds)
             else:
-                raise RuntimeError(f'Invalid gather rule: {self.args.gather}')
+                raise RuntimeError(f'Invalid gather rule: {gather}')
             v['pred'] = pred
 
         threshold = OrderedDict()
@@ -399,5 +364,5 @@ class Table(MLCommander):
         plt.show()
 
 
-runner = Table()
-runner.run()
+cli = CLI()
+cli.run()

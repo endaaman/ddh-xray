@@ -37,7 +37,6 @@ class TrainerConfig(BaseTrainerConfig):
     num_features: int
     size: int
 
-
 class Trainer(BaseTrainer):
     def prepare(self):
         self.criterion = nn.BCELoss()
@@ -101,9 +100,40 @@ class CLI(BaseMLCLI):
         trainer.start(a.epoch)
 
 
-    # def arg_predict_features(self, parser):
-    #     parser.add_argument('--checkpoint', '-c', required=True)
-    #     parser.add_argument('--target', '-t', default='test', choices=['train', 'test'])
+    # class FeatureArgs(BaseDLArgs):
+    #     lr:float = 0.001
+    #     num_features:int = Field(0, cli=('--features', '-f'))
+    #     batch_size: int = Field(8, cli=('--batch-size', '-B'))
+    #     suffix:str = ''
+    #     epoch:int = 20
+
+    # def run_feature(self, a:FeatureArgs):
+    #     dss = [XRDataset(
+    #         size=a.size,
+    #         num_features=self.a.num_features,
+    #         target=t,
+    #     ) for t in ['train', 'test']]
+
+    #     config = TrainerConfig(
+    #         model_name=a.model_name,
+    #         num_features=a.num_features,
+    #         batch_size=a.batch_size,
+    #         num_workers=a.num_workers,
+    #         lr=a.lr,
+    #         size=a.size,
+    #     )
+    #     name = f'{a.model_name}_{a.suffix}' if a.suffix else a.model_name
+    #     trainer = Trainer(
+    #         config=config,
+    #         out_dir=f'out/classification/{a.num_features}/{name}',
+    #         train_dataset=dss[0],
+    #         val_dataset=dss[1],
+    #         experiment_name='classification',
+    #         overwrite=a.overwrite,
+    #     )
+
+    #     trainer.start(a.epoch)
+
 
     # def run_predict_features(self):
     #     checkpoint = torch.load(self.args.checkpoint, map_location=lambda storage, loc: storage)

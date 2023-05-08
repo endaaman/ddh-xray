@@ -11,7 +11,6 @@ from collections import namedtuple, Counter
 from typing import NamedTuple
 
 import pandas as pd
-from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 import numpy as np
 from PIL.Image import Image as ImageType
@@ -23,10 +22,12 @@ from torchvision import transforms
 from torchvision.utils import draw_bounding_boxes
 import albumentations as A
 from albumentations.pytorch.transforms import ToTensorV2
+from pydantic import Field
 
-from endaaman import Commander, pad_to_size
+from endaaman.cli import BaseCLI
 from endaaman.ml import pil_to_tensor, tensor_to_pil
 
+from common import load_data
 from utils import draw_bb
 
 
@@ -41,35 +42,6 @@ LABEL_TO_STR = {
     6: 'left in',
 }
 
-col_target = 'treatment'
-# cols_clinical = ['female', 'breech_presentation']
-cols_clinical = ['female', 'breech_presentation', 'family_history', 'skin_laterality', 'limb_limitation']
-# cols_cat = ['female', 'family_history', 'skin_laterality', 'limb_limitation']
-
-cols_measure = ['left_alpha', 'right_alpha', 'left_oe', 'right_oe', 'left_a', 'right_a', 'left_b', 'right_b', ]
-
-do_abs = lambda x: np.power(x, 2)
-cols_extend = {
-    # 'alpha_diff': lambda x: do_abs(x['left_alpha'] - x['right_alpha']),
-    # 'oe_diff': lambda x: do_abs(x['left_oe'] - x['right_oe']),
-    # 'a_diff': lambda x: do_abs(x['left_a'] - x['right_a']),
-    # 'b_diff': lambda x: do_abs(x['left_b'] - x['right_b']),
-}
-
-cols_feature = cols_measure + list(cols_extend.keys()) + cols_clinical
-
-col_to_label = {
-    'female': 'Female',
-    'breech_presentation': 'Breech presentation',
-    'left_a': 'Left A',
-    'right_a': 'Right A',
-    'left_b': 'Left B',
-    'right_b': 'Right B',
-    'left_alpha': 'Left α',
-    'right_alpha': 'Right α',
-    'left_oe': 'Left OE',
-    'right_oe': 'Right OE',
-}
 
 
 ORIGINAL_IMAGE_SIZE = 624
@@ -203,55 +175,21 @@ class SSDAdapter():
 
 # pylint: disable=abstract-method
 class BaseDataset(Dataset):
-    def __init__(self, target, test_ratio=-1, aug_mode='same', normalize_image=True, normalize_feature=True, seed=42):
+    def __init__(self, target, test_ratio=-1, aug_mode='same', normalize_image=True, normalize_features=True, seed=42):
         self.target = target
         self.test_ratio = test_ratio
         self.aug_mode = 'same'
         self.normalize_image = normalize_image
-        self.normalize_feature = normalize_feature
+        self.normalize_features = normalize_features
         self.seed = seed
-        self.df = self.load_df()
-
-    def load_df(self):
-        df_all = pd.read_excel('data/table.xlsx', index_col=0, converters={'label': str})
-
-        df_measure = pd.read_excel('data/measurement_all.xlsx', converters={'label': str}, usecols=range(9))
-        df_measure['label'] = df_measure['label'].map('{:0>4}'.format)
-        df_measure = df_measure.set_index('label').fillna(0)
-
-        df_all = pd.merge(df_all, df_measure, left_index=True, right_index=True)
-
-        if self.normalize_feature:
-            for col in cols_measure:
-                t = df_all[col]
-                df_all[col] = (t - t.mean()) / t.std()
-
-        if self.test_ratio > 0:
-            df_train, df_test = train_test_split(
-                df_all,
-                test_size=self.test_ratio,
-                random_state=self.seed,
-                stratify=df_all['treatment'],
-            )
-            df_test['test'] = 1
-            df_train['test'] = 0
-        else:
-            df_test = df_all[df_all['test'] > 0]
-            df_train = df_all[df_all['test'] < 1]
-
-        return {
-            'all': df_all,
-            'train': df_train,
-            'test': df_test,
-        }[self.target]
+        dfs = load_data(test_ratio=test_ratio, normalize_features=normalize_features, seed=seed)
+        self.df = dfs[target]
 
 
 class XRBBDataset(BaseDataset):
-    def __init__(self, size, mode='default', **kwargs):
+    def __init__(self, size:int, mode='default', **kwargs):
         super().__init__(**kwargs)
-
         self.mode = mode
-
         self.adapter = {
             'default': DefaultDetAdaper(),
             'effdet': EffDetAdaper(),
@@ -315,7 +253,7 @@ class XRBBDataset(BaseDataset):
         return self.adapter(images, bboxes, labels)
 
 
-class ClsBaseDataset(BaseDataset):
+class BaseImageDataset(BaseDataset):
     def __init__(self, num_features=0, **kwargs):
         super().__init__(**kwargs)
         self.num_features = num_features
@@ -372,93 +310,85 @@ class ClsBaseDataset(BaseDataset):
             return (x, features), y
         return x, y
 
+class FeatureDataset(BaseDataset):
+    def __init__(self, num_features=8, **kwargs):
+        super().__init__(**kwargs)
+        self.num_features = num_features
 
-class XRDataset(ClsBaseDataset):
+    def __len__(self):
+        return len(self.df)
+
+    def __getitem__(self, idx):
+        row = self.df.iloc[idx]
+        x = row[cols_measure + cols_clinical].values[:self.num_features]
+        y = row[col_target]
+        x = torch.tensor(x)
+        y = torch.tensor(y)[None]
+        return x, y
+
+
+class XRDataset(BaseImageDataset):
     def __init__(self, size=512, **kwargs):
         super().__init__(**kwargs)
         self.items = self.load_items(base_dir='data/images')
         self.albu = A.Compose(self.create_augs(size, size))
 
 
-class XRROIDataset(ClsBaseDataset):
-    def __init__(self, base_dir='data/rois/gt', size=(512, 256), **kwargs):
+class XRROIDataset(BaseImageDataset):
+    def __init__(self, size:tuple[int, int], base_dir='data/rois/gt', **kwargs):
         super().__init__(**kwargs)
         self.items = self.load_items(base_dir=base_dir)
         self.albu = A.Compose(self.create_augs(size[0], size[1]))
 
 
-class C(Commander):
-    def arg_common(self, parser):
-        parser.add_argument('--target', '-t', default='all', choices=['all', 'train', 'test'])
-        parser.add_argument('--with-features', '-f', action='store_true')
+class CLI(BaseCLI):
+    class CommonArgs(BaseCLI.CommonArgs):
+        target: str = Field('all', cli=('-t', ), choices=['all', 'train', 'test'])
+    #     mode: str = Field('xr', choices=['xr', 'roi', 'bb_default', 'bb_effdet', 'bb_yolo', 'bb_ssd'])
+    #     num_features: int = Field(0, cli=('-f', '--features'), )
 
-    def create_dataset(self, target='xr'):
-        if target == 'xr':
-            return XRDataset(
-                target=self.args.target,
-                with_features=self.a.with_features,
-            )
-        if target == 'roi':
-            return XRROIDataset(
-                target=self.args.target,
-                with_features=self.a.with_features,
-            )
-        if target == 'bb':
-            return XRBBDataset(
-                target=self.args.target,
-                mode=self.args.mode,
-            )
-        raise RuntimeError(f'Invalid dataset type: {target}')
+    # def pre_common(self, a:CommonArgs):
+    #     if a.mode == 'xr':
+    #         self.ds = XRDataset(
+    #             target=a.target,
+    #             size=512,
+    #             num_features=a.num_features,
+    #         )
+    #     elif a.mode == 'roi':
+    #         self.ds = XRROIDataset(
+    #             target=a.target,
+    #             size=(512, 256),
+    #             num_features=a.num_features,
+    #         )
+    #     elif m := re.match('^bb_(.*)$', a.mode):
+    #         self.ds = XRBBDataset(
+    #             target=a.target,
+    #             size=512,
+    #             mode=m[1],
+    #         )
+    #     else:
+    #         raise RuntimeError(f'Invalid dataset mode: {a.mode}')
 
-    def arg_bbs(self, parser):
-        parser.add_argument('--mode', '-m', default='default', choices=['default', 'effdet', 'yolo', 'ssd'])
+    # def run_bbs(self):
+    #     dest = f'out/bbs_{self.ds.target}'
+    #     os.makedirs(dest, exist_ok=True)
+    #     for i, (img, bb, label) in tqdm(enumerate(self.ds), total=len(self.ds)):
+    #         # self.img, self.bb, self.label = item
+    #         img = tensor_to_pil(img)
+    #         ret = draw_bb(img, bb, {i:f'{l}' for i, l in enumerate(label) })
+    #         ret.save(f'{dest}/{i}.jpg')
 
-    def run_bbs(self):
-        self.ds = self.create_dataset('bb')
-        dest = f'out/bbs_{self.ds.target}'
-        os.makedirs(dest, exist_ok=True)
-        for i, (img, bb, label) in tqdm(enumerate(self.ds), total=len(self.ds)):
-            # self.img, self.bb, self.label = item
-            img = tensor_to_pil(img)
-            ret = draw_bb(img, bb, {i:f'{l}' for i, l in enumerate(label) })
-            ret.save(f'{dest}/{i}.jpg')
-
-    def arg_t(self, parser):
-        parser.add_argument('--dataset', '-d', default='xr')
-        parser.add_argument('--index', '-i', type=int, default=0)
-        parser.add_argument('--id', type=str)
+    # def arg_t(self, parser):
+    #     parser.add_argument('--dataset', '-d', default='xr')
+    #     parser.add_argument('--index', '-i', type=int, default=0)
+    #     parser.add_argument('--id', type=str)
 
     def run_t(self):
-        self.ds = self.create_dataset(self.a.dataset)
-        i = 0
-        for pack in self.ds:
-            if self.a.with_features:
-                (self.x, self.f), self.y = pack
-            else:
-                self.x, self.y = pack
-            self.item = self.ds.items[i]
-            if self.a.id:
-                if self.a.id == self.item.id:
-                    break
-            else:
-                if self.a.index == i:
-                    break
-            i += 1
+        pass
 
-    def run_loader(self):
-        self.ds = self.create_dataset(self.a.dataset)
-        loader = DataLoader(
-            dataset=self.ds,
-            batch_size=2,
-            num_workers=1,
-        )
-
-        for ((a, b), c) in loader:
-            print(a.shape)
-            print(b.shape)
-            print(c.shape)
-            break
+    def run_f(self, a:CommonArgs):
+        self.ds = FeatureDataset(target=a.target)
 
 if __name__ == '__main__':
-    cmd = C()
-    cmd.run()
+    cli = CLI()
+    cli.run()
