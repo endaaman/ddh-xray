@@ -35,20 +35,26 @@ col_to_label = {
 }
 
 def load_data(test_ratio, normalize_features, seed):
-    df_all = pd.read_excel('data/table.xlsx', index_col=0, converters={'label': str})
+    df_all = pd.read_excel('data/tables/main.xlsx', index_col=0, converters={'label': str})
+    df_ind = pd.read_excel('data/tables/ind.xlsx', index_col=0, converters={'label': str})
 
-    # sheet = 'old'
-    sheet = 'filled'
-    df_measure = pd.read_excel('data/measurement_all.xlsx', converters={'label': str}, usecols=range(9), sheet_name=sheet)
-    df_measure['label'] = df_measure['label'].map('{:0>4}'.format)
-    df_measure = df_measure.set_index('label').fillna(0)
+    # sheet = 'data'
+    # sheet = 'filled'
+    # df_measure = pd.read_excel('data/measurement_all.xlsx', converters={'label': str}, usecols=range(9), sheet_name=sheet)
+    # df_measure['label'] = df_measure['label'].map('{:0>4}'.format)
+    # df_measure = df_measure.set_index('label').fillna(0)
+    # df_all = pd.merge(df_all, df_measure, left_index=True, right_index=True)
 
-    df_all = pd.merge(df_all, df_measure, left_index=True, right_index=True)
-
+    ms = {}
     if normalize_features:
         for col in cols_measure:
             t = df_all[col]
-            df_all[col] = (t - t.mean()) / t.std()
+            ms[col] = (t.mean(), t.std())
+            # df_all[col] = (t - t.mean()) / t.std()
+        for df in [df_all, df_ind]:
+            for col in cols_measure:
+                t = df[col]
+                df[col] = (t - ms[col][0]) / ms[col][1]
 
     if test_ratio > 0:
         df_train, df_test = train_test_split(
@@ -67,4 +73,5 @@ def load_data(test_ratio, normalize_features, seed):
         'all': df_all,
         'train': df_train,
         'test': df_test,
+        'ind': df_ind,
     }
