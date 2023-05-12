@@ -17,8 +17,8 @@ from endaaman.ml import BaseMLCLI, BaseTrainer, BaseTrainerConfig, Field, BaseDL
 from endaaman.metrics import BaseMetrics
 
 from common import cols_clinical, cols_measure, col_target
-from models import TimmModelWithFeatures, TimmModel
-from datasets import XRDataset, XRROIDataset
+from models import TimmModelWithFeatures, TimmModel, LinearModel
+from datasets import XRDataset, XRROIDataset, FeatureDataset
 
 
 class ROCMetrics(BaseMetrics):
@@ -63,19 +63,48 @@ class Trainer(BaseTrainer):
         }
 
 
+
+class FeatureTrainerConfig(BaseTrainerConfig):
+    num_features: int
+
+class FeatureTrainer(BaseTrainer):
+    def prepare(self):
+        self.criterion = nn.BCELoss()
+        model = LinearModel(num_features=self.config.num_features, num_classes=1)
+        return model
+
+    def eval(self, inputs, gts):
+        inputs = inputs.to(self.device)
+        outputs = self.model(inputs)
+        loss = self.criterion(outputs, gts.to(self.device))
+        return loss, outputs
+
+    def get_metrics(self):
+        return {
+            'auc_recall_spec': ROCMetrics(),
+        }
+
+
 class CLI(BaseMLCLI):
     class TrainArgs(BaseDLArgs):
-        lr:float = 0.001
+        lr:float = 0.0001
         model_name:str = Field('tf_efficientnetv2_b0', cli=('--model', '-m'))
         num_features:int = Field(0, cli=('--features', '-f'))
         batch_size:int = Field(8, cli=('--batch-size', '-B'))
-        image:str = Field('full', regex='^full|roi$')
+        source:str = Field('full', regex='^full|roi$')
         size:int = 512
         suffix:str = ''
         epoch:int = 20
 
     def run_train(self, a:TrainArgs):
-        DS = XRDataset if a.image == 'full' else XRROIDataset
+        match a.source:
+            case 'full':
+                DS = XRDataset
+            case 'roi':
+                DS = XRROIDataset
+            case _:
+                raise RuntimeError('Invalid source:', a.source)
+
         print('Dataset type:', DS)
         dss = [DS(
             size=a.size,
@@ -94,7 +123,7 @@ class CLI(BaseMLCLI):
         name = f'{a.model_name}_{a.suffix}' if a.suffix else a.model_name
         trainer = Trainer(
             config=config,
-            out_dir=f'out/classification/{a.num_features}_{a.image}/{name}',
+            out_dir=f'out/classification/{a.num_features}_{a.source}/{name}',
             train_dataset=dss[0],
             val_dataset=dss[1],
             experiment_name='classification',
@@ -104,40 +133,37 @@ class CLI(BaseMLCLI):
         trainer.start(a.epoch)
 
 
-    # class FeatureArgs(BaseDLArgs):
-    #     lr:float = 0.001
-    #     num_features:int = Field(0, cli=('--features', '-f'))
-    #     batch_size: int = Field(8, cli=('--batch-size', '-B'))
-    #     suffix:str = ''
-    #     epoch:int = 20
+    class FeatureArgs(BaseDLArgs):
+        model_name:str = Field('linear', cli=('--model', '-m'))
+        lr:float = 0.0001
+        num_features:int = Field(8, cli=('--features', '-f'))
+        batch_size:int = Field(8, cli=('--batch-size', '-B'))
+        suffix:str = ''
+        epoch:int = 20
 
-    # def run_feature(self, a:FeatureArgs):
-    #     dss = [XRDataset(
-    #         size=a.size,
-    #         num_features=self.a.num_features,
-    #         target=t,
-    #     ) for t in ['train', 'test']]
+    def run_feature(self, a:TrainArgs):
+        dss = [FeatureDataset(
+            num_features=self.a.num_features,
+            target=t,
+        ) for t in ['train', 'test']]
 
-    #     config = TrainerConfig(
-    #         model_name=a.model_name,
-    #         num_features=a.num_features,
-    #         batch_size=a.batch_size,
-    #         num_workers=a.num_workers,
-    #         lr=a.lr,
-    #         size=a.size,
-    #     )
-    #     name = f'{a.model_name}_{a.suffix}' if a.suffix else a.model_name
-    #     trainer = Trainer(
-    #         config=config,
-    #         out_dir=f'out/classification/{a.num_features}/{name}',
-    #         train_dataset=dss[0],
-    #         val_dataset=dss[1],
-    #         experiment_name='classification',
-    #         overwrite=a.overwrite,
-    #     )
+        config = FeatureTrainerConfig(
+            num_features=a.num_features,
+            batch_size=a.batch_size,
+            num_workers=a.num_workers,
+            lr=a.lr,
+        )
+        name = f'{a.model_name}_{a.suffix}' if a.suffix else a.model_name
+        trainer = FeatureTrainer(
+            config=config,
+            out_dir=f'out/classification/{a.num_features}_feature/{name}',
+            train_dataset=dss[0],
+            val_dataset=dss[1],
+            experiment_name='classification',
+            overwrite=a.overwrite,
+        )
 
-    #     trainer.start(a.epoch)
-
+        trainer.start(a.epoch)
 
     # def run_predict_features(self):
     #     checkpoint = torch.load(self.args.checkpoint, map_location=lambda storage, loc: storage)

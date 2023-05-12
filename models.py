@@ -42,24 +42,106 @@ class TimmModel(nn.Module):
 
 
 class TimmModelWithFeatures(nn.Module):
-    def __init__(self, name, num_features, num_classes=1):
+    def __init__(self, name, num_features, setting=0, num_classes=1):
         super().__init__()
         self.num_classes = num_classes
         self.num_features = num_features
+        self.setting = setting
         self.base = timm.create_model(name, pretrained=True, in_chans=1, num_classes=num_classes)
-        self.fc = nn.Linear(
-            in_features=self.base.num_features + num_features,
-            out_features=num_classes
-        )
+
+        match setting:
+            case 0:
+                self.fc = nn.Linear(
+                    in_features=self.base.num_features + num_features,
+                    out_features=num_classes
+                )
+            case 1:
+                self.fc_image = nn.Sequential(
+                    nn.ReLU(inplace=True),
+                    nn.Linear(self.base.num_features, num_features),
+                )
+                self.fc = nn.Linear(num_features * 2, num_classes)
+            case 3:
+                self.fc_image = nn.Sequential(
+                    nn.ReLU(inplace=True),
+                    nn.Linear(self.base.num_features, num_features),
+                )
+                self.fc = nn.Sequential(
+                    nn.ReLU(inplace=True),
+                    nn.Linear(num_features * 2, 64),
+                    nn.ReLU(inplace=True),
+                    nn.Linear(64, num_classes),
+                )
 
     def get_cam_layer(self):
         return self.base.conv_head
 
+    def activate(self, x):
+        if self.num_classes > 1:
+            return torch.softmax(x, dim=1)
+        return torch.sigmoid(x)
+
     def forward(self, x, features, activate=True):
+        if self.num_features > 0:
+            x = self.base(x)
+            return self.activate(x) if activate else x
+
         x = self.base.forward_features(x)
         x = self.base.forward_head(x, pre_logits=True)
-        if self.num_features > 0 and features is not None:
-            x = torch.cat([x, features], dim=1)
+
+        match self.setting:
+            case 0:
+                x = torch.cat([x, features], dim=1)
+                x = self.fc(x)
+            case 1:
+                x = self.fc_image(x)
+                x = torch.cat([x, features], dim=1)
+                x = self.fc(x)
+        return self.activate(x) if activate else x
+
+
+class Dense(nn.Module):
+    def __init__(self, a, b=None):
+        super().__init__()
+        if not b:
+            b = a
+        self.dense = nn.Linear(a, b)
+        self.dropout = nn.Dropout()
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        x = self.dense(x)
+        x = self.dropout(x)
+        x = self.relu(x)
+        return x
+
+
+class LinearModel(nn.Module):
+    def __init__(self, num_features, num_classes):
+        super().__init__()
+        self.num_features = num_features
+        self.num_classes = num_classes
+        cfg = [
+            # 64,
+            64,
+            64,
+            num_classes,
+        ]
+        last_feat = num_features
+        layers = []
+        for i, n in enumerate(cfg):
+            layers.append(nn.Linear(last_feat, n))
+            last_feat = n
+            if i != len(cfg) - 1:
+                layers += [
+                    # nn.BatchNorm1d(n),
+                    # nn.Dropout(p=0.2),
+                    nn.ReLU(inplace=True),
+                ]
+
+        self.fc = nn.Sequential(*layers)
+
+    def forward(self, x, activate=True):
         x = self.fc(x)
         if activate:
             if self.num_classes > 1:

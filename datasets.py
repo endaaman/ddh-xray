@@ -43,7 +43,6 @@ LABEL_TO_STR = {
 }
 
 
-
 ORIGINAL_IMAGE_SIZE = 624
 IMAGE_MEAN = 0.4838
 IMAGE_STD = 0.3271
@@ -307,7 +306,7 @@ class BaseImageDataset(BaseDataset):
         if self.num_features > 0:
             v = pd.concat([item.measurement, item.clinical]).values[:self.num_features]
             features = torch.from_numpy(v).to(torch.float)
-            return (x, features), y
+            x = (x, features)
         return x, y
 
 class FeatureDataset(BaseDataset):
@@ -322,8 +321,8 @@ class FeatureDataset(BaseDataset):
         row = self.df.iloc[idx]
         x = row[cols_measure + cols_clinical].values[:self.num_features]
         y = row[col_target]
-        x = torch.tensor(x)
-        y = torch.tensor(y)[None]
+        x = torch.tensor(x).to(torch.float)
+        y = torch.tensor(y)[None].to(torch.float)
         return x, y
 
 
@@ -344,53 +343,33 @@ class XRROIDataset(BaseImageDataset):
 class CLI(BaseCLI):
     class CommonArgs(BaseCLI.CommonArgs):
         target: str = Field('all', cli=('-t', ), regex=r'^all|train|test$')
-    #     mode: str = Field('xr', choices=['xr', 'roi', 'bb_default', 'bb_effdet', 'bb_yolo', 'bb_ssd'])
-    #     num_features: int = Field(0, cli=('-f', '--features'), )
+        size:int = 512
+        num_features: int = Field(0, cli=('-f', '--features'), )
 
-    # def pre_common(self, a:CommonArgs):
-    #     if a.mode == 'xr':
-    #         self.ds = XRDataset(
-    #             target=a.target,
-    #             size=512,
-    #             num_features=a.num_features,
-    #         )
-    #     elif a.mode == 'roi':
-    #         self.ds = XRROIDataset(
-    #             target=a.target,
-    #             size=(512, 256),
-    #             num_features=a.num_features,
-    #         )
-    #     elif m := re.match('^bb_(.*)$', a.mode):
-    #         self.ds = XRBBDataset(
-    #             target=a.target,
-    #             size=512,
-    #             mode=m[1],
-    #         )
-    #     else:
-    #         raise RuntimeError(f'Invalid dataset mode: {a.mode}')
+    def run_cls(self, a:CommonArgs):
+        self.ds = XRROIDataset(target=a.target, size=a.size, num_features=a.num_features)
 
-    # def run_bbs(self):
-    #     dest = f'out/bbs_{self.ds.target}'
-    #     os.makedirs(dest, exist_ok=True)
-    #     for i, (img, bb, label) in tqdm(enumerate(self.ds), total=len(self.ds)):
-    #         # self.img, self.bb, self.label = item
-    #         img = tensor_to_pil(img)
-    #         ret = draw_bb(img, bb, {i:f'{l}' for i, l in enumerate(label) })
-    #         ret.save(f'{dest}/{i}.jpg')
+    def run_roi(self, a:CommonArgs):
+        self.ds = XRROIDataset(target=a.target, size=a.size, num_features=a.num_features)
 
-    # def arg_t(self, parser):
-    #     parser.add_argument('--dataset', '-d', default='xr')
-    #     parser.add_argument('--index', '-i', type=int, default=0)
-    #     parser.add_argument('--id', type=str)
+    def run_feature(self, a:CommonArgs):
+        self.ds = FeatureDataset(target=a.target, size=a.size, num_features=a.num_features)
+
+    class BbArgs(BaseCLI.CommonArgs):
+        mode: str = Field('default', regex='^default|effdet|yolo|ssd$')
+
+    def run_bb(self, a:BbArgs):
+        self.ds = XRBBDataset(target=a.target, size=a.size, mode=a.mode)
+        dest = f'tmp/{a.mode}_{a.target}'
+        os.makedirs(dest, exist_ok=True)
+        for i, (img, bb, label) in tqdm(enumerate(self.ds), total=len(self.ds)):
+            img = tensor_to_pil(img)
+            ret = draw_bb(img, bb, {i:f'{l}' for i, l in enumerate(label) })
+            ret.save(f'{dest}/{i}.jpg')
 
     def run_t(self):
         pass
 
-    def run_f(self, a:CommonArgs):
-        self.ds = FeatureDataset(target=a.target)
-
-    def run_roi(self, a:CommonArgs):
-        self.ds = XRROIDataset(target=a.target)
 
 if __name__ == '__main__':
     cli = CLI()
