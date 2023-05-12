@@ -16,6 +16,7 @@ from timm.scheduler.cosine_lr import CosineLRScheduler
 from endaaman.ml import BaseMLCLI, BaseTrainer, BaseTrainerConfig, Field, BaseDLArgs
 from endaaman.metrics import BaseMetrics
 
+from common import cols_clinical, cols_measure, col_target
 from models import TimmModelWithFeatures, TimmModel
 from datasets import XRDataset, XRROIDataset
 
@@ -67,13 +68,16 @@ class CLI(BaseMLCLI):
         lr:float = 0.001
         model_name:str = Field('tf_efficientnetv2_b0', cli=('--model', '-m'))
         num_features:int = Field(0, cli=('--features', '-f'))
-        batch_size: int = Field(8, cli=('--batch-size', '-B'))
+        batch_size:int = Field(8, cli=('--batch-size', '-B'))
+        image:str = Field('full', regex='^full|roi$')
         size:int = 512
         suffix:str = ''
         epoch:int = 20
 
     def run_train(self, a:TrainArgs):
-        dss = [XRDataset(
+        DS = XRDataset if a.image == 'full' else XRROIDataset
+        print('Dataset type:', DS)
+        dss = [DS(
             size=a.size,
             num_features=self.a.num_features,
             target=t,
@@ -90,7 +94,7 @@ class CLI(BaseMLCLI):
         name = f'{a.model_name}_{a.suffix}' if a.suffix else a.model_name
         trainer = Trainer(
             config=config,
-            out_dir=f'out/classification/{a.num_features}/{name}',
+            out_dir=f'out/classification/{a.num_features}_{a.image}/{name}',
             train_dataset=dss[0],
             val_dataset=dss[1],
             experiment_name='classification',

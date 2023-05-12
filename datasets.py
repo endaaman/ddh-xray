@@ -27,7 +27,7 @@ from pydantic import Field
 from endaaman.cli import BaseCLI
 from endaaman.ml import pil_to_tensor, tensor_to_pil
 
-from common import load_data
+from common import load_data, cols_clinical, cols_measure, col_target
 from utils import draw_bb
 
 
@@ -335,15 +335,15 @@ class XRDataset(BaseImageDataset):
 
 
 class XRROIDataset(BaseImageDataset):
-    def __init__(self, size:tuple[int, int], base_dir='data/rois/gt', **kwargs):
+    def __init__(self, size=512, **kwargs):
         super().__init__(**kwargs)
-        self.items = self.load_items(base_dir=base_dir)
-        self.albu = A.Compose(self.create_augs(size[0], size[1]))
+        self.items = self.load_items(base_dir='data/rois')
+        self.albu = A.Compose(self.create_augs(size, size//2))
 
 
 class CLI(BaseCLI):
     class CommonArgs(BaseCLI.CommonArgs):
-        target: str = Field('all', cli=('-t', ), choices=['all', 'train', 'test'])
+        target: str = Field('all', cli=('-t', ), regex=r'^all|train|test$')
     #     mode: str = Field('xr', choices=['xr', 'roi', 'bb_default', 'bb_effdet', 'bb_yolo', 'bb_ssd'])
     #     num_features: int = Field(0, cli=('-f', '--features'), )
 
@@ -388,6 +388,9 @@ class CLI(BaseCLI):
 
     def run_f(self, a:CommonArgs):
         self.ds = FeatureDataset(target=a.target)
+
+    def run_roi(self, a:CommonArgs):
+        self.ds = XRROIDataset(target=a.target)
 
 if __name__ == '__main__':
     cli = CLI()
