@@ -6,7 +6,6 @@ from sklearn.model_selection import StratifiedKFold, KFold
 from sklearn.impute import SimpleImputer, KNNImputer
 import lightgbm as lgb
 # import optuna.integration.lightgbm as opt_lgb
-import xgboost as xgb
 import torch
 from torch import nn, optim
 from torch.utils.data import TensorDataset, DataLoader
@@ -154,42 +153,6 @@ class LightGBMBench(Bench):
         for m in data:
             self.models.append(self.lgb.Booster(model_str=m))
 
-
-class XGBBench(Bench):
-    def preprocess(self, x, y=None):
-        x[x.isna()] = -1
-        return x, y
-
-    def _train(self, x_train, y_train, x_valid, y_valid, fold):
-        dtrain = xgb.DMatrix(x_train, label=y_train)
-        dtest = xgb.DMatrix(x_valid, label=y_valid)
-
-        params = {
-            'objective': 'binary:logistic',
-            'eval_metric': 'auc',
-        }
-
-        # model = xgb.train(xgb_params, dtrain, num_boost_round=100)
-        evals_result = {}
-        model = xgb.train(
-            params,
-            dtrain,
-            num_boost_round=100,
-            evals=[(dtest, 'eval'),(dtrain, 'train')],
-            evals_result=evals_result,
-            early_stopping_rounds=10,
-        )
-
-        return model
-
-    def _predict(self, model, x):
-        return model.predict(xgb.DMatrix(x))
-
-    def serialize(self):
-        pass
-
-    def restore(self, data):
-        pass
 
 class SVMBench(Bench):
     def __init__(self, imputer='simple', svm_kernel='rbf', **kwargs):
