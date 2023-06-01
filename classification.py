@@ -89,7 +89,7 @@ class CLI(BaseMLCLI):
     class TrainArgs(BaseDLArgs):
         lr:float = 0.0001
         model_name:str = Field('tf_efficientnetv2_b0', cli=('--model', '-m'))
-        num_features:int = Field(0, cli=('--features', '-f'))
+        num_features:int = Field(0, cli=('--num-features', '-F'))
         batch_size:int = Field(8, cli=('--batch-size', '-B'))
         source:str = Field('full', regex='^full|roi$')
         size:int = 512
@@ -123,7 +123,7 @@ class CLI(BaseMLCLI):
         name = f'{a.model_name}_{a.suffix}' if a.suffix else a.model_name
         trainer = Trainer(
             config=config,
-            out_dir=f'out/classification/{a.num_features}_{a.source}/{name}',
+            out_dir=f'out/classification/{a.source}_{a.num_features}/{name}',
             train_dataset=dss[0],
             val_dataset=dss[1],
             experiment_name='classification',
@@ -136,7 +136,7 @@ class CLI(BaseMLCLI):
     class FeatureArgs(BaseDLArgs):
         model_name:str = Field('linear', cli=('--model', '-m'))
         lr:float = 0.0001
-        num_features:int = Field(8, cli=('--features', '-f'))
+        num_features:int = Field(8, cli=('--num-features', '-F'))
         batch_size:int = Field(8, cli=('--batch-size', '-B'))
         suffix:str = ''
         epoch:int = 20

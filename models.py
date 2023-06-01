@@ -42,62 +42,63 @@ class TimmModel(nn.Module):
 
 
 class TimmModelWithFeatures(nn.Module):
-    def __init__(self, name, num_features, setting=0, num_classes=1):
+    def __init__(self, name, num_features, num_classes=1):
         super().__init__()
         self.num_classes = num_classes
         self.num_features = num_features
-        self.setting = setting
+        self.setting = 0
         self.base = timm.create_model(name, pretrained=True, in_chans=1, num_classes=num_classes)
 
-        match setting:
-            case 0:
-                self.fc = nn.Linear(
-                    in_features=self.base.num_features + num_features,
-                    out_features=num_classes
-                )
-            case 1:
-                self.fc_image = nn.Sequential(
-                    nn.ReLU(inplace=True),
-                    nn.Linear(self.base.num_features, num_features),
-                )
-                self.fc = nn.Linear(num_features * 2, num_classes)
-            case 3:
-                self.fc_image = nn.Sequential(
-                    nn.ReLU(inplace=True),
-                    nn.Linear(self.base.num_features, num_features),
-                )
-                self.fc = nn.Sequential(
-                    nn.ReLU(inplace=True),
-                    nn.Linear(num_features * 2, 64),
-                    nn.ReLU(inplace=True),
-                    nn.Linear(64, num_classes),
-                )
+        self.fc = nn.Linear(
+            in_features=self.base.num_features + num_features,
+            out_features=num_classes
+        )
+
+        # match self.setting:
+        #     case 0:
+        #         self.fc = nn.Linear(
+        #             in_features=self.base.num_features + num_features,
+        #             out_features=num_classes
+        #         )
+        #     case 1:
+        #         self.fc_image = nn.Sequential(
+        #             nn.ReLU(inplace=True),
+        #             nn.Linear(self.base.num_features, num_features),
+        #         )
+        #         self.fc = nn.Linear(num_features * 2, num_classes)
+        #     case 3:
+        #         self.fc_image = nn.Sequential(
+        #             nn.ReLU(inplace=True),
+        #             nn.Linear(self.base.num_features, num_features),
+        #         )
+        #         self.fc = nn.Sequential(
+        #             nn.ReLU(inplace=True),
+        #             nn.Linear(num_features * 2, 64),
+        #             nn.ReLU(inplace=True),
+        #             nn.Linear(64, num_classes),
+        #         )
 
     def get_cam_layer(self):
         return self.base.conv_head
 
-    def activate(self, x):
+    def do_activate(self, x, activate):
+        if not activate:
+            return x
         if self.num_classes > 1:
             return torch.softmax(x, dim=1)
         return torch.sigmoid(x)
 
     def forward(self, x, features, activate=True):
-        if self.num_features > 0:
+        if self.num_features == 0:
             x = self.base(x)
-            return self.activate(x) if activate else x
+            return self.do_activate(x, activate)
 
         x = self.base.forward_features(x)
         x = self.base.forward_head(x, pre_logits=True)
 
-        match self.setting:
-            case 0:
-                x = torch.cat([x, features], dim=1)
-                x = self.fc(x)
-            case 1:
-                x = self.fc_image(x)
-                x = torch.cat([x, features], dim=1)
-                x = self.fc(x)
-        return self.activate(x) if activate else x
+        x = torch.cat([x, features], dim=1)
+        x = self.fc(x)
+        return self.do_activate(x, activate)
 
 
 class Dense(nn.Module):
