@@ -33,12 +33,12 @@ class ROCMetrics(BaseMetrics):
         return auc, tpr[youden_index], -fpr[youden_index]+1
 
 
-class TrainerConfig(BaseTrainerConfig):
+class ImageTrainerConfig(BaseTrainerConfig):
     model_name: str
     num_features: int
     size: int
 
-class Trainer(BaseTrainer):
+class ImageTrainer(BaseTrainer):
     def prepare(self):
         self.criterion = nn.BCELoss()
         model = TimmModelWithFeatures(
@@ -86,7 +86,7 @@ class FeatureTrainer(BaseTrainer):
 
 
 class CLI(BaseMLCLI):
-    class TrainArgs(BaseDLArgs):
+    class ImageArgs(BaseDLArgs):
         lr:float = 0.0001
         model_name:str = Field('tf_efficientnetv2_b0', cli=('--model', '-m'))
         num_features:int = Field(0, cli=('--num-features', '-F'))
@@ -96,7 +96,7 @@ class CLI(BaseMLCLI):
         suffix:str = ''
         epoch:int = 20
 
-    def run_train(self, a:TrainArgs):
+    def run_image(self, a:ImageArgs):
         match a.source:
             case 'full':
                 DS = XRDataset
@@ -112,7 +112,7 @@ class CLI(BaseMLCLI):
             target=t,
         ) for t in ['train', 'test']]
 
-        config = TrainerConfig(
+        config = ImageTrainerConfig(
             model_name=a.model_name,
             num_features=a.num_features,
             batch_size=a.batch_size,
@@ -121,7 +121,7 @@ class CLI(BaseMLCLI):
             size=a.size,
         )
         name = f'{a.model_name}_{a.suffix}' if a.suffix else a.model_name
-        trainer = Trainer(
+        trainer = ImageTrainer(
             config=config,
             out_dir=f'out/classification/{a.source}_{a.num_features}/{name}',
             train_dataset=dss[0],
@@ -141,7 +141,7 @@ class CLI(BaseMLCLI):
         suffix:str = ''
         epoch:int = 20
 
-    def run_feature(self, a:TrainArgs):
+    def run_feature(self, a:FeatureArgs):
         dss = [FeatureDataset(
             num_features=self.a.num_features,
             target=t,
