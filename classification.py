@@ -5,7 +5,7 @@ from glob import glob
 from tqdm import tqdm
 import pandas as pd
 from PIL import Image
-from sklearn import metrics
+from sklearn import metrics as skmetrics
 import numpy as np
 import torch
 from torch import nn, optim
@@ -13,12 +13,14 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from timm.scheduler.cosine_lr import CosineLRScheduler
 
-from endaaman.ml import BaseMLCLI, BaseTrainer, BaseTrainerConfig, Field, BaseDLArgs
+from endaaman.ml import BaseMLCLI, BaseTrainer, BaseTrainerConfig, Field, BaseDLArgs, Checkpoint
 from endaaman.metrics import BaseMetrics
 
 from common import cols_clinical, cols_measure, col_target
 from models import TimmModelWithFeatures, TimmModel, LinearModel
 from datasets import XRDataset, XRROIDataset, FeatureDataset
+
+J = os.path.join
 
 
 class ROCMetrics(BaseMetrics):
@@ -27,10 +29,39 @@ class ROCMetrics(BaseMetrics):
             return None
         preds = preds.detach().cpu().numpy()
         gts = gts.detach().cpu().numpy()
-        fpr, tpr, __thresholds = metrics.roc_curve(gts, preds)
-        auc = metrics.auc(fpr, tpr)
+        fpr, tpr, __thresholds = skmetrics.roc_curve(gts, preds)
+        auc = skmetrics.auc(fpr, tpr)
         youden_index = np.argmax(tpr - fpr)
         return auc, tpr[youden_index], -fpr[youden_index]+1
+
+def visualize_roc(trainer:BaseTrainer, ax, train_preds, train_gts, val_preds, val_gts):
+    train_preds, train_gts, val_preds, val_gts = [
+        v.detach().cpu().numpy() for v in (train_preds, train_gts, val_preds, val_gts)
+    ]
+
+    for t, preds, gts in (('train', train_preds, train_gts), ('val', val_preds, val_gts)):
+        fpr, tpr, thresholds = skmetrics.roc_curve(gts, preds)
+        auc = skmetrics.auc(fpr, tpr)
+        ax.plot(fpr, tpr, label=f'{t} AUC:{auc:.3f}')
+        if t == 'train':
+            youden_index = np.argmax(tpr - fpr)
+            threshold = thresholds[youden_index]
+    ax.set_title(f'ROC (t={threshold:.2f})')
+    ax.set_ylabel('Sensitivity')
+    ax.set_xlabel('1 - Specificity')
+    ax.legend(loc='lower right')
+
+
+def dump_preds_gts(trainer:BaseTrainer, train_preds, train_gts, val_preds, val_gts):
+    train_preds, train_gts, val_preds, val_gts = [
+        v.detach().cpu().numpy() for v in (train_preds, train_gts, val_preds, val_gts)
+    ]
+
+    if not trainer.is_achieved_best():
+        break
+    J(trainer.out_dir, 'preds.csv')
+    print(val_preds.shape)
+    print(val_gts.shape)
 
 
 class ImageTrainerConfig(BaseTrainerConfig):
@@ -62,6 +93,16 @@ class ImageTrainer(BaseTrainer):
             'auc_recall_spec': ROCMetrics(),
         }
 
+    def get_visualizers(self):
+        return {
+            'roc': visualize_roc,
+        }
+
+    def get_hooks(self):
+        return {
+            'dump': dump_preds_gts,
+        }
+
 
 
 class FeatureTrainerConfig(BaseTrainerConfig):
@@ -84,9 +125,22 @@ class FeatureTrainer(BaseTrainer):
             'auc_recall_spec': ROCMetrics(),
         }
 
+    def get_visualizers(self):
+        return {
+            'roc': visualize_roc,
+        }
+
+    def get_hooks(self):
+        return {
+            'dump': dump_preds_gts,
+        }
+
 
 class CLI(BaseMLCLI):
-    class ImageArgs(BaseDLArgs):
+    class CommonArgs(BaseDLArgs):
+        pass
+
+    class ImageArgs(CommonArgs):
         lr:float = 0.0001
         model_name:str = Field('tf_efficientnetv2_b0', cli=('--model', '-m'))
         num_features:int = Field(0, cli=('--num-features', '-F'))
@@ -156,7 +210,7 @@ class CLI(BaseMLCLI):
         name = f'{a.model_name}_{a.suffix}' if a.suffix else a.model_name
         trainer = FeatureTrainer(
             config=config,
-            out_dir=f'out/classification/{a.num_features}_feature/{name}',
+            out_dir=f'out/classification/feature_{a.num_features}/{name}',
             train_dataset=dss[0],
             val_dataset=dss[1],
             experiment_name='classification',
@@ -165,17 +219,31 @@ class CLI(BaseMLCLI):
 
         trainer.start(a.epoch)
 
-    # def run_predict_features(self):
-    #     checkpoint = torch.load(self.args.checkpoint, map_location=lambda storage, loc: storage)
-    #     predictor = self.create_predictor(P=FeaturePredictor, checkpoint=checkpoint)
-    #     ds = XRDataset(target=self.a.target, with_features=predictor.with_features, aug_mode='test')
-    #     loader = DataLoader(dataset=ds, batch_size=self.a.batch_size, num_workers=1)
-    #     results = predictor.predict(loader=loader)
-    #     results = torch.stack(results)
+    class PredictArgs(CommonArgs):
+        experiment_dir: str = Field(..., cli=('--exp-dir', '-e'))
 
-    #     p = os.path.join(predictor.get_out_dir(), f'features_{self.a.target}.pt')
-    #     torch.save(results, p)
-    #     print(f'wrote {p}')
+    # def run_predict(self, a:PredictArgs):
+    #     checkpoint:Checkpoint = torch.load(J(a.experiment_dir, 'checkpoint_best.pt'))
+    #     print(checkpoint.config)
+    #     rest_path, model_name = os.path.split(a.experiment_dir)
+
+    #     # remove trailing suffix number
+    #     model_name = re.sub('_\d*$', '', model_name, 1)
+
+    #     rest_path, mode = os.path.split(rest_path)
+
+    #     source, num_features = mode.split('_')
+    #     num_features = int(num_features)
+
+    #     match model_name:
+    #         case 'linear':
+    #             model = LinearModel(num_features, 1)
+    #             config = FeatureTrainerConfig(**checkpoint.config)
+    #         case _:
+    #             model = TimmModelWithFeatures(model_name, num_features, 1)
+    #             config = ImageTrainerConfig(**checkpoint.config)
+
+    #     ds = XRDataset(size=config.size, num_features=num_features, target='test')
 
     # def arg_ds(self, parser):
     #     parser.add_argument('--checkpoint', '-c', required=True)
