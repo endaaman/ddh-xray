@@ -2,11 +2,11 @@ import os
 import re
 from glob import glob
 
+import numpy as np
 from tqdm import tqdm
 import pandas as pd
 from PIL import Image
 from sklearn import metrics as skmetrics
-import numpy as np
 import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader
@@ -29,10 +29,12 @@ class ROCMetrics(BaseMetrics):
             return None
         preds = preds.detach().cpu().numpy()
         gts = gts.detach().cpu().numpy()
-        fpr, tpr, __thresholds = skmetrics.roc_curve(gts, preds)
+        fpr, tpr, thresholds = skmetrics.roc_curve(gts, preds)
         auc = skmetrics.auc(fpr, tpr)
         youden_index = np.argmax(tpr - fpr)
-        return auc, tpr[youden_index], -fpr[youden_index]+1
+        preds_bool = preds > thresholds[youden_index]
+        acc = skmetrics.accuracy_score(preds_bool, gts)
+        return auc, acc, tpr[youden_index], -fpr[youden_index]+1
 
 def visualize_roc(trainer:BaseTrainer, ax, train_preds, train_gts, val_preds, val_gts):
     train_preds, train_gts, val_preds, val_gts = [
@@ -52,16 +54,30 @@ def visualize_roc(trainer:BaseTrainer, ax, train_preds, train_gts, val_preds, va
     ax.legend(loc='lower right')
 
 
-def dump_preds_gts(trainer:BaseTrainer, train_preds, train_gts, val_preds, val_gts):
-    train_preds, train_gts, val_preds, val_gts = [
-        v.detach().cpu().numpy() for v in (train_preds, train_gts, val_preds, val_gts)
-    ]
-
+def dump_preds_gts(trainer:BaseTrainer, *args):
     if not trainer.is_achieved_best():
-        break
-    J(trainer.out_dir, 'preds.csv')
-    print(val_preds.shape)
-    print(val_gts.shape)
+        return
+    names = ['train_preds', 'train_gts', 'val_preds', 'val_gts']
+    for (name, v) in zip(names, args):
+        v = v.detach().cpu().numpy().flatten()
+        np.save(J(trainer.out_dir, name), v)
+
+
+class CommonTrainer(BaseTrainer):
+    def get_metrics(self):
+        return {
+            'auc_acc_recall_spec': ROCMetrics(),
+        }
+
+    def get_visualizers(self):
+        return {
+            'roc': visualize_roc,
+        }
+
+    def get_hooks(self):
+        return {
+            'dump': dump_preds_gts,
+        }
 
 
 class ImageTrainerConfig(BaseTrainerConfig):
@@ -69,7 +85,7 @@ class ImageTrainerConfig(BaseTrainerConfig):
     num_features: int
     size: int
 
-class ImageTrainer(BaseTrainer):
+class ImageTrainer(CommonTrainer):
     def prepare(self):
         self.criterion = nn.BCELoss()
         model = TimmModelWithFeatures(
@@ -88,27 +104,11 @@ class ImageTrainer(BaseTrainer):
         loss = self.criterion(outputs, gts.to(self.device))
         return loss, outputs
 
-    def get_metrics(self):
-        return {
-            'auc_recall_spec': ROCMetrics(),
-        }
-
-    def get_visualizers(self):
-        return {
-            'roc': visualize_roc,
-        }
-
-    def get_hooks(self):
-        return {
-            'dump': dump_preds_gts,
-        }
-
-
 
 class FeatureTrainerConfig(BaseTrainerConfig):
     num_features: int
 
-class FeatureTrainer(BaseTrainer):
+class FeatureTrainer(CommonTrainer):
     def prepare(self):
         self.criterion = nn.BCELoss()
         model = LinearModel(num_features=self.config.num_features, num_classes=1)
@@ -120,35 +120,21 @@ class FeatureTrainer(BaseTrainer):
         loss = self.criterion(outputs, gts.to(self.device))
         return loss, outputs
 
-    def get_metrics(self):
-        return {
-            'auc_recall_spec': ROCMetrics(),
-        }
-
-    def get_visualizers(self):
-        return {
-            'roc': visualize_roc,
-        }
-
-    def get_hooks(self):
-        return {
-            'dump': dump_preds_gts,
-        }
-
 
 class CLI(BaseMLCLI):
     class CommonArgs(BaseDLArgs):
         pass
 
-    class ImageArgs(CommonArgs):
-        lr:float = 0.0001
-        model_name:str = Field('tf_efficientnetv2_b0', cli=('--model', '-m'))
+    class TrainArgs(BaseDLArgs):
+        lr:float = 0.001
         num_features:int = Field(0, cli=('--num-features', '-F'))
-        batch_size:int = Field(8, cli=('--batch-size', '-B'))
+        batch_size:int = Field(2, cli=('--batch-size', '-B'))
+        epoch:int = 20
+
+    class ImageArgs(TrainArgs):
+        model_name:str = Field('tf_efficientnet_b0', cli=('--model', '-m'))
         source:str = Field('full', regex='^full|roi$')
         size:int = 512
-        suffix:str = ''
-        epoch:int = 20
 
     def run_image(self, a:ImageArgs):
         match a.source:
@@ -174,26 +160,21 @@ class CLI(BaseMLCLI):
             lr=a.lr,
             size=a.size,
         )
-        name = f'{a.model_name}_{a.suffix}' if a.suffix else a.model_name
         trainer = ImageTrainer(
             config=config,
-            out_dir=f'out/classification/{a.source}_{a.num_features}/{name}',
+            out_dir=f'out/classification/{a.source}_{a.num_features}/{a.model_name}',
             train_dataset=dss[0],
             val_dataset=dss[1],
             experiment_name='classification',
+            main_metrics='auc',
             overwrite=a.overwrite,
         )
 
         trainer.start(a.epoch)
 
 
-    class FeatureArgs(BaseDLArgs):
+    class FeatureArgs(TrainArgs):
         model_name:str = Field('linear', cli=('--model', '-m'))
-        lr:float = 0.0001
-        num_features:int = Field(8, cli=('--num-features', '-F'))
-        batch_size:int = Field(8, cli=('--batch-size', '-B'))
-        suffix:str = ''
-        epoch:int = 20
 
     def run_feature(self, a:FeatureArgs):
         dss = [FeatureDataset(
@@ -207,13 +188,13 @@ class CLI(BaseMLCLI):
             num_workers=a.num_workers,
             lr=a.lr,
         )
-        name = f'{a.model_name}_{a.suffix}' if a.suffix else a.model_name
         trainer = FeatureTrainer(
             config=config,
-            out_dir=f'out/classification/feature_{a.num_features}/{name}',
+            out_dir=f'out/classification/feature_{a.num_features}/{a.model_name}',
             train_dataset=dss[0],
             val_dataset=dss[1],
             experiment_name='classification',
+            main_metrics='auc',
             overwrite=a.overwrite,
         )
 
