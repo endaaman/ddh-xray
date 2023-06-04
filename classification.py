@@ -1,6 +1,7 @@
 import os
 import re
 from glob import glob
+import math
 
 import numpy as np
 from tqdm import tqdm
@@ -9,11 +10,12 @@ from PIL import Image
 from sklearn import metrics as skmetrics
 import torch
 from torch import nn, optim
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from timm.scheduler.cosine_lr import CosineLRScheduler
 
-from endaaman.ml import BaseMLCLI, BaseTrainer, BaseTrainerConfig, Field, BaseDLArgs, Checkpoint
+from endaaman.ml import BaseMLCLI, BaseTrainer, BaseTrainerConfig, Field, BaseDLArgs, Checkpoint, roc_auc_ci
 from endaaman.metrics import BaseMetrics
 
 from common import cols_clinical, cols_measure, col_target
@@ -21,6 +23,7 @@ from models import TimmModelWithFeatures, TimmModel, LinearModel
 from datasets import XRDataset, XRROIDataset, FeatureDataset
 
 J = os.path.join
+
 
 
 class ROCMetrics(BaseMetrics):
@@ -38,27 +41,30 @@ class ROCMetrics(BaseMetrics):
 
 def visualize_roc(trainer:BaseTrainer, ax, train_preds, train_gts, val_preds, val_gts):
     train_preds, train_gts, val_preds, val_gts = [
-        v.detach().cpu().numpy() for v in (train_preds, train_gts, val_preds, val_gts)
+        v.detach().cpu().numpy().flatten() for v in (train_preds, train_gts, val_preds, val_gts)
     ]
 
     for t, preds, gts in (('train', train_preds, train_gts), ('val', val_preds, val_gts)):
         fpr, tpr, thresholds = skmetrics.roc_curve(gts, preds)
         auc = skmetrics.auc(fpr, tpr)
-        ax.plot(fpr, tpr, label=f'{t} AUC:{auc:.3f}')
+        lower, upper = roc_auc_ci(gts, preds)
+        ax.plot(fpr, tpr, label=f'{t} AUC:{auc:.3f}({lower:.3f}-{upper:.3f})')
         if t == 'train':
             youden_index = np.argmax(tpr - fpr)
             threshold = thresholds[youden_index]
+
     ax.set_title(f'ROC (t={threshold:.2f})')
     ax.set_ylabel('Sensitivity')
     ax.set_xlabel('1 - Specificity')
     ax.legend(loc='lower right')
 
 
-def dump_preds_gts(trainer:BaseTrainer, *args):
+def dump_preds_gts(trainer:BaseTrainer, train_preds, train_gts, val_preds, val_gts):
     if not trainer.is_achieved_best():
         return
-    names = ['train_preds', 'train_gts', 'val_preds', 'val_gts']
-    for (name, v) in zip(names, args):
+    names = ('train_preds', 'train_gts', 'val_preds', 'val_gts')
+    vv = (train_preds, train_gts, val_preds, val_gts)
+    for (name, v) in zip(names, vv):
         v = v.detach().cpu().numpy().flatten()
         np.save(J(trainer.out_dir, name), v)
 
@@ -84,6 +90,9 @@ class ImageTrainerConfig(BaseTrainerConfig):
     model_name: str
     num_features: int
     size: int
+    scheduler: str
+    normalize_features: bool
+    normalize_image: bool
 
 class ImageTrainer(CommonTrainer):
     def prepare(self):
@@ -92,6 +101,13 @@ class ImageTrainer(CommonTrainer):
             name=self.config.model_name,
             num_features=self.config.num_features)
         return model
+
+    def create_scheduler(self):
+        if re.match(r'^cosine.*', self.config.scheduler):
+            return CosineAnnealingLR(self.optimizer, T_max=50, eta_min=self.config.lr/10)
+        if self.config.scheduler == 'static':
+            return None
+        raise RuntimeError(f'Invalid')
 
     def eval(self, inputs, gts):
         if self.config.num_features > 0:
@@ -107,6 +123,7 @@ class ImageTrainer(CommonTrainer):
 
 class FeatureTrainerConfig(BaseTrainerConfig):
     num_features: int
+    normalize_features: bool
 
 class FeatureTrainer(CommonTrainer):
     def prepare(self):
@@ -126,15 +143,18 @@ class CLI(BaseMLCLI):
         pass
 
     class TrainArgs(BaseDLArgs):
-        lr:float = 0.001
         num_features:int = Field(0, cli=('--num-features', '-F'))
         batch_size:int = Field(2, cli=('--batch-size', '-B'))
         epoch:int = 20
+        raw_features = Field(False, cli=('--raw-features', ))
 
     class ImageArgs(TrainArgs):
+        lr:float = 0.001
         model_name:str = Field('tf_efficientnet_b0', cli=('--model', '-m'))
-        source:str = Field('full', regex='^full|roi$')
+        source:str = Field('full', cli=('--source', '-S'), regex='^full|roi$')
         size:int = 512
+        raw_image = Field(False, cli=('--raw-image', ))
+        scheduler:str = 'static'
 
     def run_image(self, a:ImageArgs):
         match a.source:
@@ -148,8 +168,10 @@ class CLI(BaseMLCLI):
         print('Dataset type:', DS)
         dss = [DS(
             size=a.size,
-            num_features=self.a.num_features,
+            num_features=a.num_features,
             target=t,
+            normalize_image=not a.raw_image,
+            normalize_features=not a.raw_features,
         ) for t in ['train', 'test']]
 
         config = ImageTrainerConfig(
@@ -159,6 +181,9 @@ class CLI(BaseMLCLI):
             num_workers=a.num_workers,
             lr=a.lr,
             size=a.size,
+            scheduler=a.scheduler,
+            normalize_image=not a.raw_image,
+            normalize_features=not a.raw_features,
         )
         trainer = ImageTrainer(
             config=config,
@@ -174,12 +199,14 @@ class CLI(BaseMLCLI):
 
 
     class FeatureArgs(TrainArgs):
+        lr:float = 0.0001
         model_name:str = Field('linear', cli=('--model', '-m'))
 
     def run_feature(self, a:FeatureArgs):
         dss = [FeatureDataset(
             num_features=self.a.num_features,
             target=t,
+            normalize_features=not a.raw_features,
         ) for t in ['train', 'test']]
 
         config = FeatureTrainerConfig(
@@ -187,6 +214,7 @@ class CLI(BaseMLCLI):
             batch_size=a.batch_size,
             num_workers=a.num_workers,
             lr=a.lr,
+            normalize_features=not a.raw_features,
         )
         trainer = FeatureTrainer(
             config=config,
