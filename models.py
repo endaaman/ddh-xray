@@ -135,7 +135,7 @@ class LinearModel(nn.Module):
         self.num_features = num_features
         self.num_classes = num_classes
         cfg = [
-            64,
+            # 128,
             64,
             64,
             num_classes,

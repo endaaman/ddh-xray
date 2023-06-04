@@ -20,15 +20,15 @@ class CLI(BaseMLCLI):
         targets = (
             (
                 'Xp + Features',
-                'out/classification/full_8/tf_efficientnet_b0',
+                'out/classification/full_8/tf_efficientnet_b0_center',
             ),
             (
                'Features',
-               'out/classification/feature_8/linear',
+               'out/classification/feature_8/linear_fc0',
             ),
             (
                'Xp',
-               'out/classification/full_0/tf_efficientnet_b0_center',
+               'out/classification/full_0/tf_efficientnet_b0',
             ),
         )
 

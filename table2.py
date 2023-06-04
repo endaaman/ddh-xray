@@ -29,11 +29,6 @@ J = os.path.join
 def inv_sigmoid(x):
     return 1/(1+np.exp(-x))
 
-@dataclass
-class Result:
-    gt: np.ndarray
-    pred: np.ndarray
-
 def calc_metrics(gt, pred):
     fpr, tpr, thresholds = skmetrics.roc_curve(gt, pred)
     auc = skmetrics.auc(fpr, tpr)
@@ -58,6 +53,12 @@ def calc_metrics(gt, pred):
         } for k, i in ii.items()
     }).transpose()
     return Metrics(fpr, tpr, thresholds, auc, ci, scores)
+
+
+@dataclass
+class Result:
+    gt: np.ndarray
+    pred: np.ndarray
 
 @dataclass
 class Metrics:
@@ -229,10 +230,13 @@ class CLI(BaseMLCLI):
         result, importance = train_gbm(df=df, target_col=col_target, seed=a.seed)
         # print(result)
         print(importance)
+        p = 'out/importance_with_cnn_p.xlsx' if a.with_cnn_p else 'out/importance.xlsx'
+        importance.to_excel(p)
 
         m:Metrics = Metrics.from_result(result)
         print(m)
         print(m.auc)
+
 
 
 
