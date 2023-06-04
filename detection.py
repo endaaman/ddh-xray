@@ -131,7 +131,7 @@ def draw_bbs(imgs, bbss, color='yellow'):
 class CLI(BaseMLCLI):
     class TrainArgs(BaseMLCLI.CommonArgs):
         lr:float = 0.001
-        batch_size:int = Field(8, cli=('--batch-size', '-B'))
+        batch_size:int = Field(2, cli=('--batch-size', '-B'))
         num_workers:int = 4
         epoch:int = Field(..., cli=('-e', ))
         depth:str = Field(..., cli=('-d', ))
@@ -154,7 +154,8 @@ class CLI(BaseMLCLI):
         )
 
         dss = [
-            XRBBDataset(mode='effdet', target=target, size=config.size()) for target in ['train', 'test']
+            XRBBDataset(mode='effdet', target=target, size=config.size())
+            for target in ['train', 'test']
         ]
 
         name = a.name.format(config.depth)

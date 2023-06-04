@@ -90,6 +90,7 @@ class ImageTrainerConfig(BaseTrainerConfig):
     model_name: str
     num_features: int
     size: int
+    crop_size: int = -1
     scheduler: str
     normalize_features: bool
     normalize_image: bool
@@ -142,17 +143,19 @@ class CLI(BaseMLCLI):
     class CommonArgs(BaseDLArgs):
         pass
 
-    class TrainArgs(BaseDLArgs):
+    class TrainArgs(CommonArgs):
         num_features:int = Field(0, cli=('--num-features', '-F'))
         batch_size:int = Field(2, cli=('--batch-size', '-B'))
         epoch:int = 20
         raw_features = Field(False, cli=('--raw-features', ))
+        suffix: str = ''
 
     class ImageArgs(TrainArgs):
         lr:float = 0.001
         model_name:str = Field('tf_efficientnet_b0', cli=('--model', '-m'))
         source:str = Field('full', cli=('--source', '-S'), regex='^full|roi$')
         size:int = 512
+        crop_size:int = Field(-1, cli=('--crop', ))
         raw_image = Field(False, cli=('--raw-image', ))
         scheduler:str = 'static'
 
@@ -181,13 +184,15 @@ class CLI(BaseMLCLI):
             num_workers=a.num_workers,
             lr=a.lr,
             size=a.size,
+            crop_size=a.crop_size,
             scheduler=a.scheduler,
             normalize_image=not a.raw_image,
             normalize_features=not a.raw_features,
         )
+        name = f'{a.model_name}_{a.suffix}' if a.suffix else a.model_name
         trainer = ImageTrainer(
             config=config,
-            out_dir=f'out/classification/{a.source}_{a.num_features}/{a.model_name}',
+            out_dir=f'out/classification/{a.source}_{a.num_features}/{name}',
             train_dataset=dss[0],
             val_dataset=dss[1],
             experiment_name='classification',
@@ -216,9 +221,10 @@ class CLI(BaseMLCLI):
             lr=a.lr,
             normalize_features=not a.raw_features,
         )
+        name = f'{a.model_name}_{a.suffix}' if a.suffix else a.model_name
         trainer = FeatureTrainer(
             config=config,
-            out_dir=f'out/classification/feature_{a.num_features}/{a.model_name}',
+            out_dir=f'out/classification/feature_{a.num_features}/{name}',
             train_dataset=dss[0],
             val_dataset=dss[1],
             experiment_name='classification',

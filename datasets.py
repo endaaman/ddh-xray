@@ -273,16 +273,18 @@ class BaseImageDataset(BaseDataset):
     def __len__(self):
         return len(self.items)
 
-    def create_augs(self, width, height):
+    def create_augs(self, crop_size, width, height):
+        common_augs = [
+            A.CenterCrop(width=width, height=height),
+        ] if crop_size > 0 else []
         augss = {
-            'train': [
-                A.RandomResizedCrop(width=width, height=height, scale=[0.8, 1.2]),
+            'train': common_augs + [
+                A.RandomResizedCrop(width=width, height=height, scale=[0.9, 1.1]),
                 # A.RandomCrop(width=512, height=512),
                 *BASE_AUGS,
             ],
-            'test': [
+            'test': common_augs + [
                 A.Resize(width=width, height=height),
-                # A.CenterCrop(width=width, height=height),
             ],
             'none': [],
         }
@@ -327,17 +329,18 @@ class FeatureDataset(BaseDataset):
 
 
 class XRDataset(BaseImageDataset):
-    def __init__(self, size=512, **kwargs):
+    def __init__(self, size=512, crop_size=-1, **kwargs):
         super().__init__(**kwargs)
         self.items = self.load_items(base_dir='data/images')
-        self.albu = A.Compose(self.create_augs(size, size))
+        self.albu = A.Compose(self.create_augs(crop_size, size, size))
 
 
 class XRROIDataset(BaseImageDataset):
-    def __init__(self, size=512, **kwargs):
+    def __init__(self, size=512, crop_size=-1, **kwargs):
         super().__init__(**kwargs)
         self.items = self.load_items(base_dir='data/rois')
-        self.albu = A.Compose(self.create_augs(size, size//2))
+        # ignore crop_size
+        self.albu = A.Compose(self.create_augs(-1, size, size//2))
 
 
 class CLI(BaseCLI):
