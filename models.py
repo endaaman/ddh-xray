@@ -46,8 +46,12 @@ class TimmModelWithFeatures(nn.Module):
         super().__init__()
         self.num_classes = num_classes
         self.num_features = num_features
-        self.setting = 0
         self.base = timm.create_model(name, pretrained=True, in_chans=1, num_classes=num_classes)
+
+        self.fc = nn.Linear(
+            in_features=self.base.num_features + num_features,
+            out_features=1
+        )
 
         self.fc0 = nn.Linear(
             in_features=self.base.num_features,
@@ -58,30 +62,6 @@ class TimmModelWithFeatures(nn.Module):
             in_features=16 + num_features,
             out_features=num_classes
         )
-
-        # match self.setting:
-        #     case 0:
-        #         self.fc = nn.Linear(
-        #             in_features=self.base.num_features + num_features,
-        #             out_features=num_classes
-        #         )
-        #     case 1:
-        #         self.fc_image = nn.Sequential(
-        #             nn.ReLU(inplace=True),
-        #             nn.Linear(self.base.num_features, num_features),
-        #         )
-        #         self.fc = nn.Linear(num_features * 2, num_classes)
-        #     case 3:
-        #         self.fc_image = nn.Sequential(
-        #             nn.ReLU(inplace=True),
-        #             nn.Linear(self.base.num_features, num_features),
-        #         )
-        #         self.fc = nn.Sequential(
-        #             nn.ReLU(inplace=True),
-        #             nn.Linear(num_features * 2, 64),
-        #             nn.ReLU(inplace=True),
-        #             nn.Linear(64, num_classes),
-        #         )
 
     def get_cam_layer(self):
         return self.base.conv_head
@@ -102,13 +82,13 @@ class TimmModelWithFeatures(nn.Module):
         x = self.base.forward_head(x, pre_logits=True)
 
         # original
-        # x = torch.cat([x, features], dim=1)
-        # x = self.fc(x)
+        x = torch.cat([x, features], dim=1)
+        x = self.fc(x)
 
         # 0
-        x = self.fc0(x)
-        x = torch.cat([x, features], dim=1)
-        x = self.fc1(x)
+        # x = self.fc0(x)
+        # x = torch.cat([x, features], dim=1)
+        # x = self.fc1(x)
 
         return self.do_activate(x, activate)
 
