@@ -59,15 +59,6 @@ def visualize_roc(trainer:BaseTrainer, ax, train_preds, train_gts, val_preds, va
     ax.legend(loc='lower right')
 
 
-def dump_preds_gts(trainer:BaseTrainer, train_preds, train_gts, val_preds, val_gts):
-    if not trainer.is_achieved_best():
-        return
-    names = ('train_preds', 'train_gts', 'val_preds', 'val_gts')
-    vv = (train_preds, train_gts, val_preds, val_gts)
-    for (name, v) in zip(names, vv):
-        v = v.detach().cpu().numpy().flatten()
-        np.save(J(trainer.out_dir, name), v)
-
 
 class CommonTrainer(BaseTrainer):
     def get_metrics(self):
@@ -78,11 +69,6 @@ class CommonTrainer(BaseTrainer):
     def get_visualizers(self):
         return {
             'roc': visualize_roc,
-        }
-
-    def get_hooks(self):
-        return {
-            'dump': dump_preds_gts,
         }
 
 
