@@ -46,21 +46,33 @@ class TimmModelWithFeatures(nn.Module):
         super().__init__()
         self.num_classes = num_classes
         self.num_features = num_features
-        self.base = timm.create_model(name, pretrained=True, in_chans=1, num_classes=num_classes)
+        self.base = timm.create_model(name, pretrained=True, in_chans=1, num_classes=128)
+        self.relu = nn.ReLU(inplace=True)
+
+        self.fc_feature = nn.Sequential(
+            nn.Linear(
+                in_features=num_features,
+                out_features=128,
+            ),
+            nn.ReLU(inplace=True),
+            nn.Linear(
+                in_features=128,
+                out_features=128,
+            ),
+            nn.ReLU(inplace=True),
+        )
+
+        # self.fc_image = nn.Sequential(
+        #     nn.ReLU(inplace=True),
+        #     nn.Linear(
+        #         in_features=self.base.num_features,
+        #         out_features=128,
+        #     ),
+        # )
 
         self.fc = nn.Linear(
-            in_features=self.base.num_features + num_features,
+            in_features=self.base.num_features + 128,
             out_features=1
-        )
-
-        self.fc0 = nn.Linear(
-            in_features=self.base.num_features,
-            out_features=16
-        )
-
-        self.fc1 = nn.Linear(
-            in_features=16 + num_features,
-            out_features=num_classes
         )
 
     def get_cam_layer(self):
@@ -80,15 +92,13 @@ class TimmModelWithFeatures(nn.Module):
 
         x = self.base.forward_features(x)
         x = self.base.forward_head(x, pre_logits=True)
+        x = self.relu(x)
+
+        features = self.fc_feature(features)
 
         # original
         x = torch.cat([x, features], dim=1)
         x = self.fc(x)
-
-        # 0
-        # x = self.fc0(x)
-        # x = torch.cat([x, features], dim=1)
-        # x = self.fc1(x)
 
         return self.do_activate(x, activate)
 
