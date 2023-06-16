@@ -137,9 +137,9 @@ class CLI(BaseMLCLI):
         suffix: str = ''
 
     class ImageArgs(TrainArgs):
-        lr:float = 0.001
-        model_name:str = Field('tf_efficientnet_b0', cli=('--model', '-m'))
-        source:str = Field('full', cli=('--source', '-S'), regex='^full|roi$')
+        lr:float = 0.0001
+        model_name:str = Field('tf_efficientnetv2_b0', cli=('--model', '-m'))
+        source:str = Field('full', cli=('--source', '-s'), regex='^full|roi$')
         size:int = 512
         crop_size:int = Field(-1, cli=('--crop', ))
         raw_image = Field(False, cli=('--raw-image', ))

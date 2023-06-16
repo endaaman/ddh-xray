@@ -210,11 +210,15 @@ class XRBBDataset(BaseDataset):
         if self.target == 'train':
             augs = [
                 # A.Resize(width=size, height=size),
+                A.CenterCrop(width=size, height=size),
                 A.RandomResizedCrop(width=size, height=size, scale=[0.8, 1.2]),
                 *BASE_AUGS,
             ]
         else:
-            augs = [A.Resize(width=size, height=size)]
+            augs = [
+                # A.Resize(width=size, height=size),
+                A.CenterCrop(width=size, height=size),
+            ]
 
         self.albu = A.ReplayCompose([
             *augs,

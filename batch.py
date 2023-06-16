@@ -1,6 +1,7 @@
 import os
 from glob import glob
 
+import torch
 from PIL import Image
 from tqdm import tqdm
 from matplotlib import pyplot as plt
@@ -12,39 +13,54 @@ from endaaman.ml import BaseMLCLI, roc_auc_ci
 J = os.path.join
 
 
+def permutation_test_between_clfs(y_test, pred_proba_1, pred_proba_2, nsamples=1000):
+    print(nsamples)
+    auc_differences = []
+    auc1 = skmetrics.roc_auc_score(y_test.ravel(), pred_proba_1.ravel())
+    auc2 = skmetrics.roc_auc_score(y_test.ravel(), pred_proba_2.ravel())
+    observed_difference = auc1 - auc2
+    for _ in range(nsamples):
+        mask = np.random.randint(2, size=len(pred_proba_1.ravel()))
+        p1 = np.where(mask, pred_proba_1.ravel(), pred_proba_2.ravel())
+        p2 = np.where(mask, pred_proba_2.ravel(), pred_proba_1.ravel())
+        auc1 = skmetrics.roc_auc_score(y_test.ravel(), p1)
+        auc2 = skmetrics.roc_auc_score(y_test.ravel(), p2)
+        auc_differences.append(auc1 - auc2)
+    return observed_difference, np.mean(auc_differences >= observed_difference)
+
+
 class CLI(BaseMLCLI):
     class RocArgs(BaseMLCLI.CommonArgs):
         target: str = 'val'
 
     def run_roc(self, a:RocArgs):
-        targets = (
-            (
+        tt = (
+            [
                 'Xp + Features',
-                'out/classification/full_8/tf_efficientnet_b0_center',
-            ),
-            (
-               'Features',
-               'out/classification/feature_8/linear_fc0',
-            ),
-            (
-               'Xp',
-               'out/classification/full_0/tf_efficientnet_b0',
-            ),
+                'out/classification_2/full_8/tf_efficientnetv2_b0_1',
+            ], [
+                'Xp',
+                'out/classification_2/full_0/tf_efficientnetv2_b0_3',
+            ]
         )
 
-        for (name, exp_dir) in targets:
-            print(name, exp_dir)
-            # preds = np.load(J(exp_dir, 'val_preds.npy'))
-            # gts = np.load(J(exp_dir, 'val_gts.npy'))
-            preds = np.load(J(exp_dir, f'{a.target}_preds.npy'))
-            gts = np.load(J(exp_dir, f'{a.target}_gts.npy'))
+        for t in tt:
+            name, exp_dir = t
+            data = torch.load(J(exp_dir, 'predictions.pt'))
+            preds = data['val_preds'].flatten().numpy()
+            gts = data['val_gts'].flatten().numpy()
+            t.append(preds)
+            t.append(gts)
             fpr, tpr, thresholds = skmetrics.roc_curve(gts, preds)
             auc = skmetrics.auc(fpr, tpr)
             lower, upper = roc_auc_ci(gts, preds)
             plt.plot(fpr, tpr, label=f'{name} AUC:{auc:.3f}({lower:.3f}-{upper:.3f})')
 
+        print(permutation_test_between_clfs(tt[0][3], tt[0][2], tt[1][2]))
+
         plt.legend()
         plt.savefig('out/roc.png')
+        plt.show()
 
     class CenterCropArgs(BaseMLCLI.CommonArgs):
         size: int

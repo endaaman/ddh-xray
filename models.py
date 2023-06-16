@@ -46,32 +46,34 @@ class TimmModelWithFeatures(nn.Module):
         super().__init__()
         self.num_classes = num_classes
         self.num_features = num_features
-        self.base = timm.create_model(name, pretrained=True, in_chans=1, num_classes=128)
-        self.relu = nn.ReLU(inplace=True)
+        self.base = timm.create_model(name, pretrained=True, in_chans=1, num_classes=num_classes)
+        cnn_num_features = self.base.num_features
 
-        self.fc_feature = nn.Sequential(
-            nn.Linear(
-                in_features=num_features,
-                out_features=128,
-            ),
-            nn.ReLU(inplace=True),
-            nn.Linear(
-                in_features=128,
-                out_features=128,
-            ),
-            nn.ReLU(inplace=True),
-        )
-
+        # S = 128
         # self.fc_image = nn.Sequential(
         #     nn.ReLU(inplace=True),
         #     nn.Linear(
         #         in_features=self.base.num_features,
-        #         out_features=128,
+        #         out_features=S,
         #     ),
         # )
+        # cnn_num_features = S
+
+        self.fc_feature = nn.Sequential(
+            # nn.Linear(
+            #     in_features=num_features,
+            #     out_features=S,
+            # ),
+            # nn.ReLU(inplace=True),
+            # nn.Linear(
+            #     in_features=S,
+            #     out_features=S,
+            # ),
+            # nn.ReLU(inplace=True),
+        )
 
         self.fc = nn.Linear(
-            in_features=self.base.num_features + 128,
+            in_features=cnn_num_features + num_features,
             out_features=1
         )
 
@@ -92,7 +94,7 @@ class TimmModelWithFeatures(nn.Module):
 
         x = self.base.forward_features(x)
         x = self.base.forward_head(x, pre_logits=True)
-        x = self.relu(x)
+        # x = self.fc_image(x)
 
         features = self.fc_feature(features)
 
