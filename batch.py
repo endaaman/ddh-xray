@@ -4,6 +4,7 @@ from glob import glob
 import torch
 from PIL import Image
 from tqdm import tqdm
+import matplotlib
 from matplotlib import pyplot as plt
 from sklearn import metrics as skmetrics
 import numpy as np
@@ -37,10 +38,10 @@ class CLI(BaseMLCLI):
         tt = (
             [
                 'Xp + Features',
-                'out/classification_2/full_8/tf_efficientnetv2_b0_1',
+                'out/classification/full_8/resnet50_0/',
             ], [
                 'Xp',
-                'out/classification_2/full_0/tf_efficientnetv2_b0_3',
+                'out/classification/full_0/resnet50_0/',
             ]
         )
 
