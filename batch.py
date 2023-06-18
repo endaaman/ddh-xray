@@ -38,10 +38,10 @@ class CLI(BaseMLCLI):
         tt = (
             [
                 'Xp + Features',
-                'out/classification/full_8/resnet50_0/',
+                'out/classification/full_8/tf_efficientnet_b8_0/',
             ], [
                 'Xp',
-                'out/classification/full_0/resnet50_0/',
+                'out/classification/full_0/tf_efficientnet_b8_0/',
             ]
         )
 

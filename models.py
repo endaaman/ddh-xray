@@ -59,18 +59,19 @@ class TimmModelWithFeatures(nn.Module):
         # )
         # cnn_num_features = S
 
-        self.fc_feature = nn.Sequential(
-            nn.Linear(
-                in_features=num_features,
-                out_features=S,
-            ),
-            nn.ReLU(inplace=True),
-            nn.Linear(
-                in_features=S,
-                out_features=S,
-            ),
-            nn.ReLU(inplace=True),
-        )
+        if num_features > 0:
+            self.fc_feature = nn.Sequential(
+                nn.Linear(
+                    in_features=num_features,
+                    out_features=S,
+                ),
+                nn.ReLU(inplace=True),
+                nn.Linear(
+                    in_features=S,
+                    out_features=S,
+                ),
+                nn.ReLU(inplace=True),
+            )
 
         self.fc = nn.Linear(
             in_features=cnn_num_features + S,
