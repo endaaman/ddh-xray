@@ -354,7 +354,7 @@ class CLI(BaseCLI):
         num_features: int = Field(0, cli=('-f', '--features'), )
 
     def run_cls(self, a:CommonArgs):
-        self.ds = XRROIDataset(target=a.target, size=a.size, num_features=a.num_features)
+        self.ds = XRDataset(target=a.target, size=a.size, num_features=a.num_features)
 
     def run_roi(self, a:CommonArgs):
         self.ds = XRROIDataset(target=a.target, size=a.size, num_features=a.num_features)

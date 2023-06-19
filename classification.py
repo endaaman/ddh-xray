@@ -164,6 +164,7 @@ class CLI(BaseMLCLI):
         ) for t in ['train', 'test']]
 
         config = ImageTrainerConfig(
+            seed=a.seed,
             model_name=a.model_name,
             num_features=a.num_features,
             batch_size=a.batch_size,
@@ -201,6 +202,7 @@ class CLI(BaseMLCLI):
         ) for t in ['train', 'test']]
 
         config = FeatureTrainerConfig(
+            seed=a.seed,
             num_features=a.num_features,
             batch_size=a.batch_size,
             num_workers=a.num_workers,

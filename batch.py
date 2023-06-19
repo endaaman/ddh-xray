@@ -8,7 +8,10 @@ import matplotlib
 from matplotlib import pyplot as plt
 from sklearn import metrics as skmetrics
 import numpy as np
+
 from endaaman.ml import BaseMLCLI, roc_auc_ci
+
+matplotlib.use('TkAgg')
 
 
 J = os.path.join
@@ -38,10 +41,13 @@ class CLI(BaseMLCLI):
         tt = (
             [
                 'Xp + Features',
-                'out/classification/full_8/tf_efficientnet_b8_0/',
+                # 'out/classification/full_8/resnet50_1/',
+                'out/classification/full_8/tf_efficientnet_b8_final',
             ], [
                 'Xp',
-                'out/classification/full_0/tf_efficientnet_b8_0/',
+                # 'out/classification/full_0/resnet50_final/',
+                # 'out/classification/full_0/tf_efficientnet_b8_1//',
+                'out/classification/full_0/tf_efficientnet_b8_final',
             ]
         )
 
