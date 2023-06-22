@@ -15,6 +15,7 @@ import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader
 from torchvision import transforms
+from torch.optim.lr_scheduler import CosineAnnealingLR
 # from torch.utils.tensorboard import SummaryWriter
 from timm.scheduler import CosineLRScheduler
 from effdet import DetBenchTrain, DetBenchPredict, EfficientDet, get_efficientdet_config
@@ -26,13 +27,13 @@ from endaaman.ml import BaseMLCLI, BaseTrainer, BaseTrainerConfig
 
 from datasets import XRBBDataset, LABEL_TO_STR, IMAGE_STD, IMAGE_MEAN
 from utils import get_state_dict
-from models import create_det_model, yolor_loss, SIZE_BY_DEPTH
-from models.ssd import MultiBoxLoss
+from models import SIZE_BY_DEPTH
 
 
 
 class EffDetTrainerConfig(BaseTrainerConfig):
     depth:str
+    scheduler:str = 'static'
 
     def size(self):
         return SIZE_BY_DEPTH[self.depth]
@@ -47,13 +48,21 @@ class EffDetTrainer(BaseTrainer):
         self.bench = DetBenchTrain(model).to(self.device)
         return model
 
+    def create_scheduler(self):
+        if m := re.match(r'^cosine_(\d+)$', self.config.scheduler):
+            scale = int(m[1])
+            return CosineAnnealingLR(self.optimizer, T_max=50, eta_min=self.config.lr/scale)
+        return None
+
     def eval(self, inputs, gts):
         self.bench.to(self.device)
         inputs = inputs.to(self.device)
-        gts['bbox'] = gts['bbox'].to(self.device)
-        gts['cls'] = gts['cls'].to(self.device)
-        loss = self.bench(inputs, gts)
-        return loss['loss'], None
+        gts = {
+            'bbox': gts['bbox'].to(self.device),
+            'cls': gts['cls'].to(self.device)
+        }
+        d = self.bench(inputs, gts)
+        return d['loss'], None
 
     def get_metrics(self):
         return {}
@@ -131,12 +140,13 @@ def draw_bbs(imgs, bbss, color='yellow'):
 class CLI(BaseMLCLI):
     class TrainArgs(BaseMLCLI.CommonArgs):
         lr:float = 0.001
+        scheduler: str = Field('cosine_10', cli=('--scheduler', ))
         batch_size:int = Field(2, cli=('--batch-size', '-B'))
         num_workers:int = 4
-        epoch:int = Field(..., cli=('-e', ))
-        depth:str = Field(..., cli=('-d', ))
+        epoch:int = Field(50, cli=('-e', ))
+        depth:str = Field('d0', cli=('-d', ))
         name:str = '{}'
-        overwrite:bool = Field(False, cli=('--overwrite', ))
+        overwrite:bool = Field(False, cli=('--overwrite', '-O', ))
 
         @classmethod
         @validator('depth')
@@ -151,6 +161,7 @@ class CLI(BaseMLCLI):
             batch_size=a.batch_size,
             num_workers=a.num_workers,
             depth=a.depth,
+            scheduler=a.scheduler,
         )
 
         dss = [
@@ -162,7 +173,7 @@ class CLI(BaseMLCLI):
 
         trainer = EffDetTrainer(
             config=config,
-            out_dir=f'out/detection/effdet/{name}',
+            out_dir=f'out/detection/{name}',
             train_dataset=dss[0],
             val_dataset=dss[1],
             experiment_name='detection',

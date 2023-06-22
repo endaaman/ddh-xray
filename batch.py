@@ -40,11 +40,11 @@ class CLI(BaseMLCLI):
     def run_roc(self, a:RocArgs):
         tt = (
             [
-                'Xp + Features',
+                'Xp images + Measurements',
                 # 'out/classification/full_8/resnet50_1/',
                 'out/classification/full_8/tf_efficientnet_b8_final',
             ], [
-                'Xp',
+                'Xp images',
                 # 'out/classification/full_0/resnet50_final/',
                 # 'out/classification/full_0/tf_efficientnet_b8_1//',
                 'out/classification/full_0/tf_efficientnet_b8_final',
@@ -61,11 +61,17 @@ class CLI(BaseMLCLI):
             fpr, tpr, thresholds = skmetrics.roc_curve(gts, preds)
             auc = skmetrics.auc(fpr, tpr)
             lower, upper = roc_auc_ci(gts, preds)
-            plt.plot(fpr, tpr, label=f'{name} AUC:{auc:.3f}({lower:.3f}-{upper:.3f})')
+            # plt.plot(fpr, tpr, label=f'{name} AUC:{auc:.3f}({lower:.3f}-{upper:.3f})')
+            plt.plot(fpr, tpr, label=f'{name} AUC:{auc:.3f}')
 
-        print(permutation_test_between_clfs(tt[0][3], tt[0][2], tt[1][2]))
+        diff, p = permutation_test_between_clfs(tt[0][3], tt[0][2], tt[1][2])
 
-        plt.legend()
+        plt.text(0.58, 0.14, f'permutaion p-value: {p:.5f}', fontstyle='italic')
+
+
+        plt.ylabel('Sensitivity')
+        plt.xlabel('1 - Specificity')
+        plt.legend(loc='lower right')
         plt.savefig('out/roc.png')
         plt.show()
 

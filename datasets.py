@@ -209,15 +209,15 @@ class XRBBDataset(BaseDataset):
 
         if self.target == 'train':
             augs = [
-                # A.Resize(width=size, height=size),
-                A.CenterCrop(width=size, height=size),
+                A.Resize(width=size, height=size),
+                # A.CenterCrop(width=size, height=size),
                 A.RandomResizedCrop(width=size, height=size, scale=[0.8, 1.2]),
                 *BASE_AUGS,
             ]
         else:
             augs = [
-                # A.Resize(width=size, height=size),
-                A.CenterCrop(width=size, height=size),
+                A.Resize(width=size, height=size),
+                # A.CenterCrop(width=size, height=size),
             ]
 
         self.albu = A.ReplayCompose([
@@ -362,17 +362,18 @@ class CLI(BaseCLI):
     def run_feature(self, a:CommonArgs):
         self.ds = FeatureDataset(target=a.target, size=a.size, num_features=a.num_features)
 
-    class BbArgs(BaseCLI.CommonArgs):
+
+    class BbArgs(CommonArgs):
         mode: str = Field('default', regex='^default|effdet|yolo|ssd$')
 
     def run_bb(self, a:BbArgs):
         self.ds = XRBBDataset(target=a.target, size=a.size, mode=a.mode)
-        dest = f'tmp/{a.mode}_{a.target}'
-        os.makedirs(dest, exist_ok=True)
-        for i, (img, bb, label) in tqdm(enumerate(self.ds), total=len(self.ds)):
-            img = tensor_to_pil(img)
-            ret = draw_bb(img, bb, {i:f'{l}' for i, l in enumerate(label) })
-            ret.save(f'{dest}/{i}.jpg')
+        # dest = f'tmp/{a.mode}_{a.target}'
+        # os.makedirs(dest, exist_ok=True)
+        # for i, (img, bb, label) in tqdm(enumerate(self.ds), total=len(self.ds)):
+        #     img = tensor_to_pil(img)
+        #     ret = draw_bb(img, bb, {i:f'{l}' for i, l in enumerate(label) })
+        #     ret.save(f'{dest}/{i}.jpg')
 
     def run_t(self):
         pass
