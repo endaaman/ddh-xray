@@ -140,7 +140,7 @@ def draw_bbs(imgs, bbss, color='yellow'):
 class CLI(BaseMLCLI):
     class TrainArgs(BaseMLCLI.CommonArgs):
         lr:float = 0.001
-        scheduler: str = Field('cosine_10', cli=('--scheduler', ))
+        scheduler: str = Field('cosine_100', cli=('--scheduler', ))
         batch_size:int = Field(2, cli=('--batch-size', '-B'))
         num_workers:int = 4
         epoch:int = Field(50, cli=('-e', ))
