@@ -2,7 +2,7 @@ from typing import Union, Optional, List, Tuple, Text, BinaryIO
 import os
 
 import torch
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import numpy as np
 import pandas as pd
 from torchvision import transforms
@@ -52,6 +52,21 @@ def draw_bb(img:Image, bb:np.ndarray, labels:List[str]=None):
     img = (pil_to_tensor(img) * 255).type(torch.uint8)
     t = draw_bounding_boxes(image=img, boxes=torch.from_numpy(bb), labels=labels)
     return tensor_to_pil(t)
+
+
+def draw_bbs(imgs, bbss, color='yellow'):
+    font = ImageFont.truetype('/usr/share/fonts/ubuntu/Ubuntu-L.ttf', 20)
+    results = []
+    for img, bbs in zip(imgs, bbss):
+        draw = ImageDraw.Draw(img)
+        for _, bb in enumerate(bbs):
+            label = bb[4].long().item()
+            bbox = bb[:4]
+            draw.rectangle(((bbox[0], bbox[1]), (bbox[2], bbox[3])), outline=color, width=1)
+            # draw.text((bbox[0], bbox[1]), LABEL_TO_STR[label], font=font, fill=color)
+        results.append(img)
+    return results
+
 
 def get_state_dict(model):
     if type(model) == torch.nn.DataParallel:

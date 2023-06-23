@@ -26,9 +26,22 @@ from endaaman import load_images_from_dir_or_file
 from endaaman.ml import BaseMLCLI, BaseTrainer, BaseTrainerConfig
 
 from datasets import XRBBDataset, LABEL_TO_STR, IMAGE_STD, IMAGE_MEAN
-from utils import get_state_dict
+from utils import draw_bbs
 from models import SIZE_BY_DEPTH
 
+
+J = os.path.join
+
+def transform_image(size, i_or_ii):
+    f = transforms.Compose([
+        transforms.CenterCrop((512, 512)),
+        transforms.Resize((size, size)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=IMAGE_MEAN, std=IMAGE_STD),
+    ])
+    if isinstance(i_or_ii, (tuple, list)):
+        return torch.stack([f(i) for i in i_or_ii])
+    return f(i)
 
 
 class EffDetTrainerConfig(BaseTrainerConfig):
@@ -38,20 +51,26 @@ class EffDetTrainerConfig(BaseTrainerConfig):
     def size(self):
         return SIZE_BY_DEPTH[self.depth]
 
+def create_model(depth):
+    cfg = get_efficientdet_config(f'tf_efficientdet_{depth}')
+    cfg.num_classes = 6
+    return  EfficientDet(cfg)
+
 
 class EffDetTrainer(BaseTrainer):
     def prepare(self):
         # if m := re.match(r'^effdet_d(\d)$', name):
-        cfg = get_efficientdet_config(f'tf_efficientdet_{self.config.depth}')
-        cfg.num_classes = 6
-        model =  EfficientDet(cfg)
+        model =  create_model(self.config.depth)
         self.bench = DetBenchTrain(model).to(self.device)
         return model
 
     def create_scheduler(self):
-        if m := re.match(r'^cosine_(\d+)$', self.config.scheduler):
-            scale = int(m[1])
-            return CosineAnnealingLR(self.optimizer, T_max=50, eta_min=self.config.lr/scale)
+        if m := re.match(r'^cosine_(\d+)_(\d+)$', self.config.scheduler):
+            eta = int(m[1])
+            scale = int(m[2])
+            return CosineAnnealingLR(self.optimizer, T_max=eta, eta_min=self.config.lr/scale)
+        if self.config.scheduler == 'plateau':
+            return optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, patience=5)
         return None
 
     def eval(self, inputs, gts):
@@ -74,18 +93,22 @@ class EffDetPredictor():
 
 def select_best_bbs(bbs):
     '''
-    bbs: [[x0, y0, x1, y1, cls]]
+    bbs: [[x0, y0, x1, y1, RANK, cls]]
     '''
     best_bbs = []
     missing = []
     for label, text in LABEL_TO_STR.items():
-        m = bbs[bbs[:, 4].long() == label]
+        m = bbs[bbs[:, 5].long() == label]
+        m = m.detach().cpu()
         if len(m) > 0:
             # select first bb
-            best_bbs.append(m[0])
+            best_bbs.append(m[0, [0,1,2,3,5]])
         else:
-            missing.append(text)
-    return torch.stack(best_bbs), ' '.join(missing)
+            best_bbs.append(torch.tensor([-1, -1, -1, -1, label]).float())
+    return torch.stack(best_bbs)
+
+def select_best_bbss(bbss):
+    return [select_best_bbs(bbs) for bbs in bbss]
 
 
 
@@ -121,20 +144,6 @@ def calc_aps(pred_bbss, gt_bbss):
     print(f'VOC PASCAL mAP: {pascalMAP}')
     print(f'VOC PASCAL mAP in all points: {pascalMAP_all}')
     print(f'COCO mAP: {cocoMAP}')
-
-def draw_bbs(imgs, bbss, color='yellow'):
-    font = ImageFont.truetype('/usr/share/fonts/ubuntu/Ubuntu-L.ttf', 20)
-    results = []
-    for img, bbs in zip(imgs, bbss):
-        draw = ImageDraw.Draw(img)
-        for _, bb in enumerate(bbs):
-            label = bb[4].long().item()
-            bbox = bb[:4]
-            draw.rectangle(((bbox[0], bbox[1]), (bbox[2], bbox[3])), outline=color, width=1)
-            draw.text((bbox[0], bbox[1]), LABEL_TO_STR[label], font=font, fill=color)
-        results.append(img)
-    return results
-
 
 
 class CLI(BaseMLCLI):
@@ -183,47 +192,84 @@ class CLI(BaseMLCLI):
         trainer.start(a.epoch)
 
 
-    class PredArgs(BaseMLCLI.CommonArgs):
-        checkpoint:str = Field(..., cli=('--checkpoint', '-c' ))
+    class PredictArgs(BaseMLCLI.CommonArgs):
+        model_dir:str = Field(..., cli=('--model-dir', '-m' ))
         src:str = Field(..., cli=('--src', '-s' ))
 
-    def run_predict(self):
-        return
-        # checkpoint = torch.load(self.args.checkpoint, map_location=lambda storage, loc: storage)
-        # predictor = self.create_predictor(P=EffDetPredictor, checkpoint=checkpoint)
-        # paths = get_image_paths_from_dir_or_file(self.a.src)
-        # images = [Image.open(p) for p in paths]
-        # bbss = predictor.start(images=images)
-        # results = self.draw_bbs(images, bbss)
-        # dest_dir = os.path.join('out', checkpoint.name, 'predict')
-        # os.makedirs(dest_dir, exist_ok=True)
-        # for result, path in zip(results, paths):
-        #     name = os.path.splitext(os.path.basename(path))[0]
-        #     result.save(os.path.join(dest_dir, f'{name}.jpg'))
+    def run_predict(self, a:PredictArgs):
+        config = EffDetTrainerConfig.from_file(J(a.model_dir, 'config.json'))
+        model =  create_model(config.depth)
+        chp = torch.load(J(a.model_dir, 'checkpoint_best.pt'))
+        model.load_state_dict(chp.model_state)
+        bench = DetBenchPredict(model)
+
+        size = SIZE_BY_DEPTH[config.depth]
+
+        images, paths = load_images_from_dir_or_file(a.src, with_path=True)
+        images = [i.resize((size, size)) for i in images]
+
+        tt = transform_image(size, images)
+
+        preds = bench(tt)
+        bbss = select_best_bbss(preds)
+        results = draw_bbs(images, bbss)
+        dest_dir = J(a.model_dir, 'predict')
+        os.makedirs(dest_dir, exist_ok=True)
+        for result, path in zip(results, paths):
+            name = os.path.splitext(os.path.basename(path))[0]
+            result.save(os.path.join(dest_dir, f'{name}.jpg'))
 
 
     class DsArgs(BaseMLCLI.CommonArgs):
-        checkpoint:str = Field(..., cli=('--checkpoint', '-c' ))
-        target:str = Field(..., cli=('--target', '-t' ), choices=['train', 'test'])
+        model_dir:str = Field(..., cli=('--model-dir', '-m' ))
+        target:str = Field('test', cli=('--target', '-t' ), regex=r'^all|train|test$')
+        batch_size:int = Field(2, cli=('--batch-size', '-B'))
+        cpu:bool = Field(False, cli=('--cpu', ))
 
-    def run_ds(self):
-        return
-        # checkpoint = torch.load(self.args.checkpoint, map_location=lambda storage, loc: storage)
-        # predictor = self.create_predictor(P=EffDetPredictor, checkpoint=checkpoint)
+    def run_ds(self, a:DsArgs):
+        config = EffDetTrainerConfig.from_file(J(a.model_dir, 'config.json'))
+        model =  create_model(config.depth)
+        chp = torch.load(J(a.model_dir, 'checkpoint_best.pt'))
+        model.load_state_dict(chp.model_state)
+        bench = DetBenchPredict(model)
 
-        # ds = XRBBDataset(mode='effdet', target=self.a.target, size=predictor.image_size)
-        # images = [i.image for i in ds.items]
+        size = SIZE_BY_DEPTH[config.depth]
 
-        # pred_bbss = predictor.start(images=images)
+        ds = XRBBDataset(
+            mode='default',
+            aug_mode='test',
+            target=a.target,
+            size=size,
+        )
+        loader = DataLoader(dataset=ds, batch_size=a.batch_size, shuffle=False)
+
+        device = 'cuda' if (not a.cpu) and torch.cuda.is_available() else 'cpu'
+        bench = bench.to(device)
+
+        pred_bbss = []
+        gt_bbss = []
+        images = []
+        for inputs, bbs, labels in tqdm(loader):
+            preds = bench(inputs.to(device))
+            pred_bbss += select_best_bbss(preds)
+            gt_bbss += [torch.cat([bbs, labels[..., None]], dim=-1)]
+
+        gt_bbss = torch.cat(gt_bbss)
+        pred_bbss = torch.stack(pred_bbss)
+        pred_bbss[..., :4] *= 624/size
+
         # gt_bbss = torch.stack([torch.from_numpy(i.bb.values) for i in ds.items])
+        # gt_bbss[..., :4] *= size/624
+        # cc = transforms.CenterCrop((512, 512))
+        images = [i.image for i in ds.items]
 
-        # results = self.draw_bbs(images, gt_bbss, 'green')
-        # results = self.draw_bbs(results, pred_bbss, 'red')
+        results = draw_bbs(images, gt_bbss, 'green')
+        results = draw_bbs(results, pred_bbss, 'red')
 
-        # dest_dir = os.path.join('out', checkpoint.name, 'dataset')
-        # os.makedirs(dest_dir, exist_ok=True)
-        # for result, item in zip(results, ds.items):
-        #     result.save(os.path.join(dest_dir, f'{item.name}.jpg'))
+        dest_dir = J(a.model_dir, f'dataset_{a.target}')
+        os.makedirs(dest_dir, exist_ok=True)
+        for result, item in zip(results, ds.items):
+            result.save(os.path.join(dest_dir, f'{item.name}.jpg'))
 
     def arg_map(self, parser):
         parser.add_argument('--checkpoint', '-c', required=True)

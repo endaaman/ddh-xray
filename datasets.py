@@ -28,7 +28,7 @@ from endaaman.cli import BaseCLI
 from endaaman.ml import pil_to_tensor, tensor_to_pil
 
 from common import load_data, cols_clinical, cols_measure, col_target
-from utils import draw_bb
+from utils import draw_bb, draw_bbs
 
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -177,7 +177,7 @@ class BaseDataset(Dataset):
     def __init__(self, target, test_ratio=-1, aug_mode='same', normalize_image=True, normalize_features=True, seed=42):
         self.target = target
         self.test_ratio = test_ratio
-        self.aug_mode = 'same'
+        self.aug_mode = aug_mode
         self.normalize_image = normalize_image
         self.normalize_features = normalize_features
         self.seed = seed
@@ -207,18 +207,23 @@ class XRBBDataset(BaseDataset):
                 bb=read_label_as_df(label_path)))
         print(f'{self.target} images loaded')
 
-        if self.target == 'train':
-            augs = [
+        augss = {
+            'train': [
+                # A.CenterCrop(width=512, height=512),
                 A.Resize(width=size, height=size),
-                # A.CenterCrop(width=size, height=size),
+                A.Rotate(limit=(-10, 10)),
                 A.RandomResizedCrop(width=size, height=size, scale=[0.8, 1.2]),
-                *BASE_AUGS,
-            ]
-        else:
-            augs = [
+                # *BASE_AUGS,
+                A.HorizontalFlip(p=0.5),
+            ],
+            'test': [
+                # A.CenterCrop(width=512, height=512),
                 A.Resize(width=size, height=size),
-                # A.CenterCrop(width=size, height=size),
             ]
+        }
+        augss['all'] = augss['test']
+        augss['same'] = augss[self.target]
+        augs = augss[self.aug_mode]
 
         self.albu = A.ReplayCompose([
             *augs,
@@ -362,18 +367,24 @@ class CLI(BaseCLI):
     def run_feature(self, a:CommonArgs):
         self.ds = FeatureDataset(target=a.target, size=a.size, num_features=a.num_features)
 
-
     class BbArgs(CommonArgs):
-        mode: str = Field('default', regex='^default|effdet|yolo|ssd$')
+        pass
+        # mode: str = Field('default', regex='^default|effdet|yolo|ssd$')
 
     def run_bb(self, a:BbArgs):
-        self.ds = XRBBDataset(target=a.target, size=a.size, mode=a.mode)
-        # dest = f'tmp/{a.mode}_{a.target}'
-        # os.makedirs(dest, exist_ok=True)
-        # for i, (img, bb, label) in tqdm(enumerate(self.ds), total=len(self.ds)):
-        #     img = tensor_to_pil(img)
-        #     ret = draw_bb(img, bb, {i:f'{l}' for i, l in enumerate(label) })
-        #     ret.save(f'{dest}/{i}.jpg')
+        self.ds = XRBBDataset(target=a.target, size=a.size, mode='default')
+        dest = f'tmp/bb_{a.target}'
+        os.makedirs(dest, exist_ok=True)
+        t = tqdm(enumerate(self.ds), total=len(self.ds))
+        for i, (img, bb, label) in t:
+            img = tensor_to_pil(img)
+            bbs = torch.from_numpy(np.concatenate([bb, label[..., None]], axis=1))
+            ret = draw_bbs([img], [bbs])
+            p = f'{dest}/{i}.jpg'
+            ret[0].save(p)
+            t.set_description(p)
+            t.refresh()
+
 
     def run_t(self):
         pass
