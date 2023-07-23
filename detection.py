@@ -47,6 +47,7 @@ def transform_image(size, i_or_ii):
 class EffDetTrainerConfig(BaseTrainerConfig):
     depth:str
     scheduler:str = 'static'
+    ratio:float = -1
 
     def size(self):
         return SIZE_BY_DEPTH[self.depth]
@@ -156,6 +157,7 @@ class CLI(BaseMLCLI):
         depth:str = Field('d0', cli=('-d', ))
         name:str = '{}'
         overwrite:bool = Field(False, cli=('--overwrite', '-O', ))
+        ratio:float = -1
 
         @classmethod
         @validator('depth')
@@ -167,6 +169,7 @@ class CLI(BaseMLCLI):
     def run_train(self, a):
         config = EffDetTrainerConfig(
             lr=a.lr,
+            ratio=a.ratio,
             batch_size=a.batch_size,
             num_workers=a.num_workers,
             depth=a.depth,
@@ -174,7 +177,11 @@ class CLI(BaseMLCLI):
         )
 
         dss = [
-            XRBBDataset(mode='effdet', target=target, size=config.size())
+            XRBBDataset(
+                mode='effdet',
+                test_ratio=a.ratio,
+                target=target,
+                size=config.size())
             for target in ['train', 'test']
         ]
 

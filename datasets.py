@@ -210,10 +210,10 @@ class XRBBDataset(BaseDataset):
         augss = {
             'train': [
                 # A.CenterCrop(width=512, height=512),
-                A.Resize(width=size, height=size),
+                # A.Resize(width=size, height=size),
                 A.Rotate(limit=(-10, 10)),
                 A.RandomResizedCrop(width=size, height=size, scale=[0.8, 1.2]),
-                # *BASE_AUGS,
+                *BASE_AUGS,
                 A.HorizontalFlip(p=0.5),
             ],
             'test': [
