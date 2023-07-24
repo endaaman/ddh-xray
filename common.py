@@ -65,6 +65,9 @@ def load_data(test_ratio, normalize_features, seed):
         )
         df_test['test'] = 1
         df_train['test'] = 0
+    elif test_ratio == 0:
+        df_train = pd.DataFrame(columns=df_all.columns)
+        df_test = pd.DataFrame(columns=df_all.columns)
     else:
         df_test = df_all[df_all['test'] > 0]
         df_train = df_all[df_all['test'] < 1]

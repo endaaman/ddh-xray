@@ -7,6 +7,7 @@ import numpy as np
 from tqdm import tqdm
 import pandas as pd
 from PIL import Image
+from pydantic import Field
 from sklearn import metrics as skmetrics
 import torch
 from torch import nn, optim
@@ -15,8 +16,8 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from timm.scheduler.cosine_lr import CosineLRScheduler
 
-from endaaman.ml import BaseMLCLI, BaseTrainer, BaseTrainerConfig, Field, BaseDLArgs, Checkpoint, roc_auc_ci
-from endaaman.metrics import BaseMetrics
+from endaaman.ml import BaseMLCLI, BaseTrainer, BaseTrainerConfig, BaseDLArgs, Checkpoint, roc_auc_ci
+from endaaman.ml.metrics import BaseMetrics
 
 from common import cols_clinical, cols_measure, col_target
 from models import TimmModelWithFeatures, TimmModel, LinearModel
@@ -134,10 +135,11 @@ class CLI(BaseMLCLI):
         batch_size:int = Field(2, cli=('--batch-size', '-B'))
         epoch:int = 20
         raw_features = Field(False, cli=('--raw-features', ))
-        suffix: str = ''
+        name:str = '{}'
 
     class ImageArgs(TrainArgs):
         lr:float = 0.0001
+        basedir:str = 'data'
         model_name:str = Field('tf_efficientnetv2_b0', cli=('--model', '-m'))
         source:str = Field('full', cli=('--source', '-s'), regex='^full|roi$')
         size:int = 512
@@ -156,9 +158,10 @@ class CLI(BaseMLCLI):
 
         print('Dataset type:', DS)
         dss = [DS(
+            target=t,
+            basedir=J(a.basedir, t),
             size=a.size,
             num_features=a.num_features,
-            target=t,
             normalize_image=not a.raw_image,
             normalize_features=not a.raw_features,
         ) for t in ['train', 'test']]
@@ -176,7 +179,7 @@ class CLI(BaseMLCLI):
             normalize_image=not a.raw_image,
             normalize_features=not a.raw_features,
         )
-        name = f'{a.model_name}_{a.suffix}' if a.suffix else a.model_name
+        name = a.name.format(a.model_name)
         trainer = ImageTrainer(
             config=config,
             out_dir=f'out/classification/{a.source}_{a.num_features}/{name}',
@@ -209,7 +212,7 @@ class CLI(BaseMLCLI):
             lr=a.lr,
             normalize_features=not a.raw_features,
         )
-        name = f'{a.model_name}_{a.suffix}' if a.suffix else a.model_name
+        name = a.name.format(a.model_name)
         trainer = FeatureTrainer(
             config=config,
             out_dir=f'out/classification/feature_{a.num_features}/{name}',

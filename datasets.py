@@ -42,6 +42,8 @@ LABEL_TO_STR = {
     6: 'left in',
 }
 
+J = os.path.join
+
 
 ORIGINAL_IMAGE_SIZE = 624
 IMAGE_MEAN = 0.4838
@@ -174,15 +176,15 @@ class SSDAdapter():
 
 # pylint: disable=abstract-method
 class BaseDataset(Dataset):
-    def __init__(self, target, test_ratio=-1, aug_mode='same', normalize_image=True, normalize_features=True, seed=42):
+    def __init__(self, target, basedir='data', aug_mode='same', normalize_image=True, normalize_features=True, seed=42):
         self.target = target
-        self.test_ratio = test_ratio
+        self.basedir = J(basedir, target)
         self.aug_mode = aug_mode
         self.normalize_image = normalize_image
         self.normalize_features = normalize_features
         self.seed = seed
-        dfs = load_data(test_ratio=test_ratio, normalize_features=normalize_features, seed=seed)
-        self.df = dfs[target]
+        dfs = load_data(test_ratio=0, normalize_features=normalize_features, seed=seed)
+        self.df = dfs['all']
 
 
 class XRBBDataset(BaseDataset):
@@ -211,10 +213,10 @@ class XRBBDataset(BaseDataset):
             'train': [
                 # A.CenterCrop(width=512, height=512),
                 # A.Resize(width=size, height=size),
-                A.Rotate(limit=(-10, 10)),
-                A.RandomResizedCrop(width=size, height=size, scale=[0.8, 1.2]),
+                # A.Rotate(limit=(-5, 5)),
+                A.RandomResizedCrop(width=size, height=size, scale=[0.9, 1.1]),
                 *BASE_AUGS,
-                A.HorizontalFlip(p=0.5),
+                # A.HorizontalFlip(p=0.5),
             ],
             'test': [
                 # A.CenterCrop(width=512, height=512),
@@ -266,17 +268,17 @@ class BaseImageDataset(BaseDataset):
         super().__init__(**kwargs)
         self.num_features = num_features
 
-    def load_items(self, base_dir='data/images'):
+    def load_items(self, basedir):
         items = []
         for idx, row in tqdm(self.df.iterrows(), leave=False, total=len(self.df)):
             items.append(ClsItem(
                 test=row.test,
                 name=idx,
-                image=Image.open(os.path.join(base_dir, f'{idx}.jpg')).copy(),
+                image=Image.open(os.path.join(basedir, f'{idx}.jpg')).copy(),
                 clinical=row[cols_clinical],
                 measurement=row[cols_measure],
                 treatment=row.treatment))
-        print(f'{self.target} images loaded from {base_dir}')
+        print(f'{self.target} images loaded from {basedir}')
         return items
 
     def __len__(self):
@@ -340,14 +342,14 @@ class FeatureDataset(BaseDataset):
 class XRDataset(BaseImageDataset):
     def __init__(self, size=512, crop_size=-1, **kwargs):
         super().__init__(**kwargs)
-        self.items = self.load_items(base_dir='data/images')
+        self.items = self.load_items(basedir=self.basedir)
         self.albu = A.Compose(self.create_augs(crop_size, size, size))
 
 
 class XRROIDataset(BaseImageDataset):
     def __init__(self, size=512, crop_size=-1, **kwargs):
         super().__init__(**kwargs)
-        self.items = self.load_items(base_dir='data/rois')
+        self.items = self.load_items(basedir=self.basedir)
         # ignore crop_size
         self.albu = A.Compose(self.create_augs(-1, size, size//2))
 
