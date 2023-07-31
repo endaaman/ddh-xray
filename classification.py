@@ -139,7 +139,7 @@ class CLI(BaseMLCLI):
 
     class ImageArgs(TrainArgs):
         lr:float = 0.0001
-        basedir:str = 'data'
+        fold: int = Field(None, cli=('--fold', '-f', ))
         model_name:str = Field('tf_efficientnetv2_b0', cli=('--model', '-m'))
         source:str = Field('full', cli=('--source', '-s'), regex='^full|roi$')
         size:int = 512
@@ -157,10 +157,13 @@ class CLI(BaseMLCLI):
                 raise RuntimeError('Invalid source:', a.source)
 
         print('Dataset type:', DS)
+
+        basedir = f'data/folds/bag' if a.fold is None else f'data/folds/fold{a.fold}'
         dss = [DS(
             target=t,
-            basedir=J(a.basedir, t),
+            basedir=J(basedir, t),
             size=a.size,
+            crop_size=a.crop_size,
             num_features=a.num_features,
             normalize_image=not a.raw_image,
             normalize_features=not a.raw_features,

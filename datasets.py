@@ -284,7 +284,7 @@ class BaseImageDataset(BaseDataset):
                 clinical=row[cols_clinical],
                 measurement=row[cols_measure],
                 treatment=row.treatment))
-        print(f'{self.target} images loaded from {basedir}')
+        print(f'Loaded {len(items)} images ({self.target}) from {basedir}')
         return items
 
     def __len__(self):
