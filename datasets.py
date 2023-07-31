@@ -178,13 +178,19 @@ class SSDAdapter():
 class BaseDataset(Dataset):
     def __init__(self, target, basedir='data', aug_mode='same', normalize_image=True, normalize_features=True, seed=42):
         self.target = target
-        self.basedir = J(basedir, target)
+        self.basedir = basedir
         self.aug_mode = aug_mode
         self.normalize_image = normalize_image
         self.normalize_features = normalize_features
         self.seed = seed
+
         dfs = load_data(test_ratio=0, normalize_features=normalize_features, seed=seed)
-        self.df = dfs['all']
+        df = dfs['all']
+
+        names = sorted(glob(J(basedir, 'images', '*.jpg')))
+        labels = [os.path.splitext(os.path.basename(p))[0] for p in names]
+        df = df[df.index.isin(labels)]
+        self.df = df
 
 
 class XRBBDataset(BaseDataset):
@@ -274,7 +280,7 @@ class BaseImageDataset(BaseDataset):
             items.append(ClsItem(
                 test=row.test,
                 name=idx,
-                image=Image.open(os.path.join(basedir, f'{idx}.jpg')).copy(),
+                image=Image.open(os.path.join(basedir, 'images', f'{idx}.jpg')).copy(),
                 clinical=row[cols_clinical],
                 measurement=row[cols_measure],
                 treatment=row.treatment))
@@ -357,17 +363,18 @@ class XRROIDataset(BaseImageDataset):
 class CLI(BaseCLI):
     class CommonArgs(BaseCLI.CommonArgs):
         target: str = Field('all', cli=('-t', ), regex=r'^all|train|test$')
+        basedir: str = Field('data/all', cli=('-b', ))
         size:int = 512
         num_features: int = Field(0, cli=('-f', '--features'), )
 
     def run_cls(self, a:CommonArgs):
-        self.ds = XRDataset(target=a.target, size=a.size, num_features=a.num_features)
+        self.ds = XRDataset(target=a.target, basedir=a.basedir, size=a.size, num_features=a.num_features)
 
     def run_roi(self, a:CommonArgs):
-        self.ds = XRROIDataset(target=a.target, size=a.size, num_features=a.num_features)
+        self.ds = XRROIDataset(target=a.target, basedir=a.basedir, size=a.size, num_features=a.num_features)
 
     def run_feature(self, a:CommonArgs):
-        self.ds = FeatureDataset(target=a.target, size=a.size, num_features=a.num_features)
+        self.ds = FeatureDataset(target=a.target, basedir=a.basedir, size=a.size, num_features=a.num_features)
 
     class BbArgs(CommonArgs):
         pass
