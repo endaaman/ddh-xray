@@ -7,6 +7,7 @@ from tqdm import tqdm
 import matplotlib
 from matplotlib import pyplot as plt
 from sklearn import metrics as skmetrics
+from scipy.stats import ttest_ind
 import numpy as np
 
 from endaaman.ml import BaseMLCLI, roc_auc_ci
@@ -93,6 +94,43 @@ class CLI(BaseMLCLI):
             i = i.crop((x0, y0, x1, y1))
             i.save(f'{d}/{name}')
 
+
+    def run_roc_folds_mean(self, a):
+        aucs = {
+            'full_0': [],
+            'full_8': [],
+        }
+        for mode in ['full_0', 'full_8']:
+            preds = []
+            gts = []
+            for fold in [1, 2, 3, 4, 5]:
+                P = torch.load(f'data/result/{mode}/tf_efficientnetv2_b0_fold{fold}/predictions.pt', map_location=torch.device('cpu'))
+                pred = P['val_preds'].flatten()
+                gt = P['val_gts'].flatten()
+
+                fpr, tpr, thresholds = skmetrics.roc_curve(gt, pred)
+                auc = skmetrics.auc(fpr, tpr)
+                aucs[mode].append(auc)
+                preds.append(pred)
+                gts.append(gt)
+
+            preds = torch.cat(preds).numpy()
+            gts = torch.cat(gts).numpy()
+
+            fpr, tpr, thresholds = skmetrics.roc_curve(gts, preds)
+            auc = skmetrics.auc(fpr, tpr)
+            # lower, upper = roc_auc_ci(gts, preds)
+            # plt.plot(fpr, tpr, label=f'{name} AUC:{auc:.3f}({lower:.3f}-{upper:.3f})')
+            plt.plot(fpr, tpr, label=f'{mode} AUC:{auc:.3f}')
+
+        p = ttest_ind(aucs['full_8'], aucs['full_0'])
+        print(p)
+
+        plt.ylabel('Sensitivity')
+        plt.xlabel('1 - Specificity')
+        plt.legend(loc='lower right')
+        plt.savefig('out/roc_folds_mean.png')
+        plt.show()
 
 
 if __name__ == '__main__':

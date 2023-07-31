@@ -158,7 +158,7 @@ class CLI(BaseMLCLI):
 
         print('Dataset type:', DS)
 
-        basedir = f'data/folds/bag' if a.fold is None else f'data/folds/fold{a.fold}'
+        basedir = 'data/folds/bag' if a.fold is None else f'data/folds/fold{a.fold}'
         dss = [DS(
             target=t,
             basedir=J(basedir, t),
