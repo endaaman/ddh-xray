@@ -1,5 +1,8 @@
+import itertools
 import invoke
 from endaaman.utils import prod_fmt
+
+
 
 @invoke.task
 def image_all_folds(c):
@@ -15,3 +18,9 @@ def image_all_folds(c):
     for cmd in cmds:
         print(f'RUN: {cmd}')
         c.run(cmd)
+
+
+@invoke.task
+def p(c):
+    cmds = prod_fmt('fold:{fold} feature:{feature}', {'fold': [0, 1], 'feature': [0, 8]})
+    print(cmds)

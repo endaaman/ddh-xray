@@ -131,6 +131,7 @@ class CLI(BaseMLCLI):
             plt.plot(fpr, tpr, label=f'{mode} AUC:{auc:.3f}')
 
         p = ttest_ind(aucs['full_8'], aucs['full_0'])
+        print(aucs)
         print(p)
 
         plt.ylabel('Sensitivity')
