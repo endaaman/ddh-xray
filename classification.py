@@ -95,7 +95,7 @@ class ImageTrainer(CommonTrainer):
             return CosineAnnealingLR(self.optimizer, T_max=50, eta_min=self.config.lr/10)
         if self.config.scheduler == 'static':
             return None
-        raise RuntimeError(f'Invalid')
+        raise RuntimeError('Invalid')
 
     def eval(self, inputs, gts):
         if self.config.num_features > 0:
@@ -140,7 +140,7 @@ class CLI(BaseMLCLI):
     class ImageArgs(TrainArgs):
         lr:float = 0.0001
         fold: int = Field(None, cli=('--fold', '-f', ))
-        model_name:str = Field('tf_efficientnetv2_b0', cli=('--model', '-m'))
+        model_name:str = Field('efficientnet_b0', cli=('--model', '-m'))
         source:str = Field('full', cli=('--source', '-s'), regex='^full|roi$')
         size:int = 512
         crop_size:int = Field(-1, cli=('--crop', ))
