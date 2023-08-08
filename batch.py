@@ -108,7 +108,7 @@ class CLI(BaseMLCLI):
         for mode in ['full_0', 'full_8']:
             preds = []
             gts = []
-            for fold in [1, 2, 3, 4, 5]:
+            for fold in [1, 2, 3, 4, 5, 6]:
                 P = torch.load(
                     f'data/result/6folds/{a.model}/{mode}/tf_efficientnet_{a.model}_fold{fold}/predictions.pt',
                     map_location=torch.device('cpu'))
