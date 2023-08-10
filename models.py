@@ -45,7 +45,7 @@ class TimmModelWithFeatures(nn.Module):
     def __init__(self, name, with_features, num_classes=1):
         super().__init__()
         self.num_classes = num_classes
-        self.num_features = num_features
+        self.with_features = with_features
         self.base = timm.create_model(name, pretrained=True, in_chans=1, num_classes=num_classes)
         cnn_num_features = self.base.num_features
 
@@ -61,7 +61,7 @@ class TimmModelWithFeatures(nn.Module):
 
         self.fc_feature = nn.Sequential(
             nn.Linear(
-                in_features=num_features,
+                in_features=8,
                 out_features=S,
             ),
             nn.ReLU(inplace=True),
@@ -88,7 +88,7 @@ class TimmModelWithFeatures(nn.Module):
         return torch.sigmoid(x)
 
     def forward(self, x, features, activate=True):
-        if self.num_features == 0:
+        if self.with_features == 0:
             x = self.base(x)
             return self.do_activate(x, activate)
 

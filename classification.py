@@ -81,6 +81,7 @@ class ImageTrainerConfig(BaseTrainerConfig):
     scheduler: str
     with_features: bool
     normalize_image: bool
+    normalize_features: bool
 
 class ImageTrainer(CommonTrainer):
     def prepare(self):
@@ -144,7 +145,7 @@ class CLI(BaseMLCLI):
         size:int = 512
         crop_size:int = Field(-1, cli=('--crop', ))
         raw_image = Field(False, cli=('--raw-image', ))
-        with_features: bool = Field(..., cli=('--with-features', '-F', ), )
+        with_features: bool = Field(False, cli=('--with-features', '-F', ), )
         scheduler:str = 'static'
         exp: str = 'classification'
 
@@ -184,7 +185,7 @@ class CLI(BaseMLCLI):
             normalize_features=not a.raw_features,
         )
         name = a.name.format(a.model_name)
-        subname = 'image_feature' if a.with_features else 'image'
+        subname = 'integrated' if a.with_features else 'image'
         trainer = ImageTrainer(
             config=config,
             out_dir=f'out/{a.exp}/{subname}/{name}',
@@ -194,6 +195,13 @@ class CLI(BaseMLCLI):
             main_metrics='auc',
             overwrite=a.overwrite,
         )
+
+        if a.with_features:
+            print('load weight')
+            chp:Checkpoint = torch.load(f'out/{a.exp}/image/{name}/checkpoint_best.pt')
+            trainer.model.load_state_dict(chp.model_state)
+            # for param in trainer.model.base.parameters():
+            #     param.requires_grad = False
 
         trainer.start(a.epoch)
 
