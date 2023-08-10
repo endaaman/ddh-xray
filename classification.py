@@ -75,11 +75,11 @@ class CommonTrainer(BaseTrainer):
 
 class ImageTrainerConfig(BaseTrainerConfig):
     model_name: str
-    num_features: int
+    with_features: bool = False
     size: int
     crop_size: int = -1
     scheduler: str
-    normalize_features: bool
+    with_features: bool
     normalize_image: bool
 
 class ImageTrainer(CommonTrainer):
@@ -87,7 +87,7 @@ class ImageTrainer(CommonTrainer):
         self.criterion = nn.BCELoss()
         model = TimmModelWithFeatures(
             name=self.config.model_name,
-            num_features=self.config.num_features)
+            with_features=self.config.with_features)
         return model
 
     def create_scheduler(self):
@@ -98,7 +98,7 @@ class ImageTrainer(CommonTrainer):
         raise RuntimeError('Invalid')
 
     def eval(self, inputs, gts):
-        if self.config.num_features > 0:
+        if self.config.with_features:
             inputs, features = inputs
             features = features.to(self.device)
         else:
@@ -131,7 +131,6 @@ class CLI(BaseMLCLI):
         pass
 
     class TrainArgs(CommonArgs):
-        num_features:int = Field(0, cli=('--num-features', '-F'))
         batch_size:int = Field(2, cli=('--batch-size', '-B'))
         epoch:int = 20
         raw_features = Field(False, cli=('--raw-features', ))
@@ -145,6 +144,7 @@ class CLI(BaseMLCLI):
         size:int = 512
         crop_size:int = Field(-1, cli=('--crop', ))
         raw_image = Field(False, cli=('--raw-image', ))
+        with_features: bool = Field(..., cli=('--with-features', '-F', ), )
         scheduler:str = 'static'
 
     def run_image(self, a:ImageArgs):
@@ -164,7 +164,7 @@ class CLI(BaseMLCLI):
             basedir=J(basedir, t),
             size=a.size,
             crop_size=a.crop_size,
-            num_features=a.num_features,
+            num_features=8 if a.with_features else 0,
             normalize_image=not a.raw_image,
             normalize_features=not a.raw_features,
         ) for t in ['train', 'test']]
@@ -172,7 +172,7 @@ class CLI(BaseMLCLI):
         config = ImageTrainerConfig(
             seed=a.seed,
             model_name=a.model_name,
-            num_features=a.num_features,
+            with_features=a.with_features,
             batch_size=a.batch_size,
             num_workers=a.num_workers,
             lr=a.lr,
@@ -183,9 +183,10 @@ class CLI(BaseMLCLI):
             normalize_features=not a.raw_features,
         )
         name = a.name.format(a.model_name)
+        subname = 'image_feature' if a.with_features else 'image'
         trainer = ImageTrainer(
             config=config,
-            out_dir=f'out/classification/{a.source}_{a.num_features}/{name}',
+            out_dir=f'out/classification/{subname}/{name}',
             train_dataset=dss[0],
             val_dataset=dss[1],
             experiment_name='classification',
