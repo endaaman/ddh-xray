@@ -1,5 +1,6 @@
 import os
 from glob import glob
+import json
 
 import torch
 from PIL import Image
@@ -101,7 +102,7 @@ class CLI(BaseMLCLI):
 
     def run_roc_folds_mean(self, a):
         matplotlib.use('Agg')
-        aucs = {
+        result = {
             'full_0': [],
             'full_8': [],
         }
@@ -117,7 +118,7 @@ class CLI(BaseMLCLI):
 
                 fpr, tpr, __thresholds = skmetrics.roc_curve(gt, pred)
                 auc = skmetrics.auc(fpr, tpr)
-                aucs[mode].append(auc)
+                result[mode].append(auc)
                 preds.append(pred)
                 gts.append(gt)
 
@@ -130,22 +131,19 @@ class CLI(BaseMLCLI):
             # plt.plot(fpr, tpr, label=f'{name} AUC:{auc:.3f}({lower:.3f}-{upper:.3f})')
             plt.plot(fpr, tpr, label=f'{mode} AUC:{auc:.3f}')
 
-        p = ttest_ind(aucs['full_8'], aucs['full_0'])
-        print(aucs)
-        print(p)
+        tvalue, pvalue = ttest_ind(result['full_8'], result['full_0'])
+        result['tvalue'] = tvalue
+        result['pvalue'] = pvalue
 
         plt.ylabel('Sensitivity')
         plt.xlabel('1 - Specificity')
         plt.legend(loc='lower right')
         plt.savefig(f'data/result/roc_folds_mean_{a.model}.png')
-        d = {
-            'full_0': {
-                'aucs': [],
-            },
-            'full_8': {
-                'aucs': [],
-            }
-        }
+        with open(f'data/result/roc_folds_mean_{a.model}.json', 'w', encoding='utf-8') as f:
+            json.dump(result, f, indent=2)
+
+        print(result)
+
         # if not a.noshow:
         #     plt.show()
 
