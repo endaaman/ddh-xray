@@ -146,6 +146,7 @@ class CLI(BaseMLCLI):
         raw_image = Field(False, cli=('--raw-image', ))
         with_features: bool = Field(..., cli=('--with-features', '-F', ), )
         scheduler:str = 'static'
+        exp: str = 'classification'
 
     def run_image(self, a:ImageArgs):
         match a.source:
@@ -186,10 +187,10 @@ class CLI(BaseMLCLI):
         subname = 'image_feature' if a.with_features else 'image'
         trainer = ImageTrainer(
             config=config,
-            out_dir=f'out/classification/{subname}/{name}',
+            out_dir=f'out/{a.exp}/{subname}/{name}',
             train_dataset=dss[0],
             val_dataset=dss[1],
-            experiment_name='classification',
+            experiment_name=a.exp,
             main_metrics='auc',
             overwrite=a.overwrite,
         )

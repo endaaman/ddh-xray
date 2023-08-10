@@ -97,8 +97,9 @@ class CLI(BaseMLCLI):
             i.save(f'{d}/{name}')
 
     class RocFoldsMeanArgs(BaseMLCLI.CommonArgs):
-        model: str = 'b0'
         noshow: bool = Field(False, cli=('--noshow', ))
+        model:str = 'resnet34'
+        basedir: str = 'out/classification_resnet'
 
     def run_roc_folds_mean(self, a):
         matplotlib.use('Agg')
@@ -111,7 +112,7 @@ class CLI(BaseMLCLI):
             gts = []
             for fold in [1, 2, 3, 4, 5, 6]:
                 P = torch.load(
-                    f'data/result/6folds/{a.model}/{mode}/tf_efficientnet_{a.model}_fold{fold}/predictions.pt',
+                    J(a.basedir, mode, f'{a.model}_fold{fold}/predictions.pt'),
                     map_location=torch.device('cpu'))
                 pred = P['val_preds'].flatten()
                 gt = P['val_gts'].flatten()
