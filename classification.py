@@ -145,7 +145,7 @@ class CLI(BaseMLCLI):
         size:int = 512
         crop_size:int = Field(-1, cli=('--crop', ))
         raw_image = Field(False, cli=('--raw-image', ))
-        with_features: bool = Field(False, cli=('--with-features', '-F', ), )
+        mode: str = Field(False, cli=('--mode', ), regex='^image|integrated|additional$')
         scheduler:str = 'static'
         exp: str = 'classification'
 
@@ -166,7 +166,7 @@ class CLI(BaseMLCLI):
             basedir=J(basedir, t),
             size=a.size,
             crop_size=a.crop_size,
-            num_features=8 if a.with_features else 0,
+            num_features=8 if a.mode == 'integrated' else 0,
             normalize_image=not a.raw_image,
             normalize_features=not a.raw_features,
         ) for t in ['train', 'test']]
@@ -174,7 +174,7 @@ class CLI(BaseMLCLI):
         config = ImageTrainerConfig(
             seed=a.seed,
             model_name=a.model_name,
-            with_features=a.with_features,
+            with_features=a.mode == 'integrated',
             batch_size=a.batch_size,
             num_workers=a.num_workers,
             lr=a.lr,
@@ -185,7 +185,7 @@ class CLI(BaseMLCLI):
             normalize_features=not a.raw_features,
         )
         name = a.name.format(a.model_name)
-        subname = 'integrated' if a.with_features else 'image'
+        subname = a.mode
         trainer = ImageTrainer(
             config=config,
             out_dir=f'out/{a.exp}/{subname}/{name}',
@@ -196,12 +196,20 @@ class CLI(BaseMLCLI):
             overwrite=a.overwrite,
         )
 
-        if a.with_features:
-            print('load weight')
-            chp:Checkpoint = torch.load(f'out/{a.exp}/image/{name}/checkpoint_best.pt')
+        if a.mode == 'integrated':
+            print('load weight for integrated')
+            chp:Checkpoint = torch.load(f'out/{a.exp}/image/{name}/checkpoint_last.pt')
             trainer.model.load_state_dict(chp.model_state)
-            # for param in trainer.model.base.parameters():
-            #     param.requires_grad = False
+            for param in trainer.model.base.parameters():
+                param.requires_grad = False
+
+        elif a.mode == 'additional':
+            print('load weight for additional')
+            chp:Checkpoint = torch.load(f'out/{a.exp}/image/{name}/checkpoint_last.pt')
+            trainer.model.load_state_dict(chp.model_state)
+            trainer.model.fc_base.reset_parameters()
+            for param in trainer.model.base.parameters():
+                param.requires_grad = False
 
         trainer.start(a.epoch)
 

@@ -49,6 +49,11 @@ class TimmModelWithFeatures(nn.Module):
         self.base = timm.create_model(name, pretrained=True, in_chans=1, num_classes=num_classes)
         cnn_num_features = self.base.num_features
 
+        self.fc_base = nn.Linear(
+            in_features=cnn_num_features,
+            out_features=1
+        )
+
         S = 128
         # self.fc_image = nn.Sequential(
         #     nn.ReLU(inplace=True),
@@ -89,7 +94,9 @@ class TimmModelWithFeatures(nn.Module):
 
     def forward(self, x, features, activate=True):
         if self.with_features == 0:
-            x = self.base(x)
+            x = self.base.forward_features(x)
+            x = self.base.forward_head(x, pre_logits=True)
+            x = self.fc_base(x)
             return self.do_activate(x, activate)
 
         x = self.base.forward_features(x)

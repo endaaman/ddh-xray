@@ -103,16 +103,19 @@ class CLI(BaseMLCLI):
 
     def run_roc_folds_mean(self, a):
         matplotlib.use('Agg')
+        arm1 = 'integrated'
+        # arm2 = 'additional'
+        arm2 = 'image'
         result = {
-            'full_0': [],
-            'full_8': [],
+            arm1: [],
+            arm2: [],
         }
-        for mode in ['full_0', 'full_8']:
+        for mode in [arm1, arm2]:
             preds = []
             gts = []
             for fold in [1, 2, 3, 4, 5, 6]:
                 P = torch.load(
-                    J(a.basedir, mode, f'{a.model}_fold{fold}/predictions.pt'),
+                    J(a.basedir, mode, f'{a.model}_fold{fold}/predictions_last.pt'),
                     map_location=torch.device('cpu'))
                 pred = P['val_preds'].flatten()
                 gt = P['val_gts'].flatten()
@@ -132,7 +135,7 @@ class CLI(BaseMLCLI):
             # plt.plot(fpr, tpr, label=f'{name} AUC:{auc:.3f}({lower:.3f}-{upper:.3f})')
             plt.plot(fpr, tpr, label=f'{mode} AUC:{auc:.3f}')
 
-        tvalue, pvalue = ttest_ind(result['full_8'], result['full_0'])
+        tvalue, pvalue = ttest_ind(result[arm1], result[arm2])
         result['tvalue'] = tvalue
         result['pvalue'] = pvalue
 
