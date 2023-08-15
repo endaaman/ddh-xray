@@ -104,8 +104,8 @@ class CLI(BaseMLCLI):
     def run_roc_folds_mean(self, a):
         matplotlib.use('Agg')
         arm1 = 'integrated'
-        # arm2 = 'additional'
-        arm2 = 'image'
+        arm2 = 'additional'
+        # arm2 = 'image'
         result = {
             arm1: [],
             arm2: [],

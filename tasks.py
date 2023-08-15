@@ -25,11 +25,11 @@ def image_all_folds(c):
     cmds = prod_fmt(
         'python classification.py image --model {MODEL} {FEATURES} --fold {FOLD} --name "{{}}_fold{FOLD}" --exp {EXP} -B 16',
         {
-            'EXP': ['classification_resnet_freeze'],
-            'MODEL': ['resnet34', 'resnet50'],
+            'EXP': ['classification_resnet_lr'],
+            'MODEL': ['resnet34'],
             'FOLD': [1, 2, 3, 4, 5, 6],
             'FEATURES': [
-                '--lr 0.001 --mode image',
+                '--lr 0.0001 --mode image',
                 '--lr 0.0001 --mode additional',
                 '--lr 0.0001 --mode integrated',
             ],

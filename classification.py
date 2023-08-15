@@ -196,20 +196,20 @@ class CLI(BaseMLCLI):
             overwrite=a.overwrite,
         )
 
-        if a.mode == 'integrated':
-            print('load weight for integrated')
-            chp:Checkpoint = torch.load(f'out/{a.exp}/image/{name}/checkpoint_last.pt')
-            trainer.model.load_state_dict(chp.model_state)
-            for param in trainer.model.base.parameters():
-                param.requires_grad = False
+        # if a.mode == 'integrated':
+        #     print('load weight for integrated')
+        #     chp:Checkpoint = torch.load(f'out/{a.exp}/image/{name}/checkpoint_last.pt')
+        #     trainer.model.load_state_dict(chp.model_state)
+        #     for param in trainer.model.base.parameters():
+        #         param.requires_grad = False
 
-        elif a.mode == 'additional':
-            print('load weight for additional')
-            chp:Checkpoint = torch.load(f'out/{a.exp}/image/{name}/checkpoint_last.pt')
-            trainer.model.load_state_dict(chp.model_state)
-            trainer.model.fc_base.reset_parameters()
-            for param in trainer.model.base.parameters():
-                param.requires_grad = False
+        # elif a.mode == 'additional':
+        #     print('load weight for additional')
+        #     chp:Checkpoint = torch.load(f'out/{a.exp}/image/{name}/checkpoint_last.pt')
+        #     trainer.model.load_state_dict(chp.model_state)
+        #     trainer.model.fc_base.reset_parameters()
+        #     for param in trainer.model.base.parameters():
+        #         param.requires_grad = False
 
         trainer.start(a.epoch)
 
