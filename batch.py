@@ -5,14 +5,18 @@ import json
 import torch
 from PIL import Image
 from tqdm import tqdm
+import pandas as pd
 import matplotlib
 from matplotlib import pyplot as plt
 from sklearn import metrics as skmetrics
 from scipy.stats import ttest_ind
 import numpy as np
 from pydantic import Field
+import lightgbm as lgb
 
 from endaaman.ml import BaseMLCLI, roc_auc_ci
+
+from common import col_target, cols_feature, cols_measure, load_data
 
 # matplotlib.use('TkAgg')
 
@@ -150,6 +154,65 @@ class CLI(BaseMLCLI):
 
         # if not a.noshow:
         #     plt.show()
+
+    def run_assign_folds_to_table(self, a):
+        df = pd.read_excel('data/table.xlsx', index_col=0)
+
+        df['fold'] = -1
+        for fold in range(1,7):
+            ii = sorted([int(f[:4]) for f in os.listdir(f'data/folds6/fold{fold}/test/images/')])
+            df.loc[df.index.isin(ii), 'fold'] = fold
+        df.to_excel('data/table2.xlsx')
+
+    def run_gbm_by_folds(self, a):
+        # df = pd.read_excel('data/table.xlsx', index_col=0)
+        dfs = load_data(0, True, a.seed)
+        df = dfs['all']
+        for fold in range(1,7):
+            df_train = df[df['fold'] != fold]
+            df_valid = df[df['fold'] == fold]
+
+            x_train = df_train[cols_measure]
+            y_train = df_train[col_target]
+            x_valid = df_valid[cols_measure]
+            y_valid = df_valid[col_target]
+
+            train_set = lgb.Dataset(x_train, label=y_train, categorical_feature=[])
+            valid_sets = [train_set]
+            # valid_data = lgb.Dataset(x_valid, label=y_valid, categorical_feature=[])
+            # valid_sets += [valid_data]
+
+            model = lgb.train(
+                params={
+                    'objective': 'binary',
+                    'num_threads': -1,
+                    'max_depth': 3,
+                    'bagging_seed': a.seed,
+                    'random_state': a.seed,
+                    'boosting': 'gbdt',
+                    'metric': 'auc',
+                    'verbosity': -1,
+                    'zero_as_missing': True,
+                },
+                train_set=train_set,
+                num_boost_round=10000,
+                valid_sets=valid_sets,
+                # early_stopping_rounds=150,
+                callbacks=[
+                    lgb.early_stopping(stopping_rounds=10, verbose=False),
+                    lgb.log_evaluation(False)
+                ],
+                categorical_feature=[],
+            )
+
+            pred_valid = model.predict(x_valid, num_iteration=model.best_iteration)
+
+            fpr, tpr, thresholds = skmetrics.roc_curve(y_valid, pred_valid)
+            auc = skmetrics.auc(fpr, tpr)
+            print(fold, auc)
+
+
+
 
 
 if __name__ == '__main__':
