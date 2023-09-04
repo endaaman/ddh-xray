@@ -21,6 +21,8 @@ from common import col_target, cols_feature, cols_measure, load_data
 # matplotlib.use('TkAgg')
 
 
+json.encoder.FLOAT_REPR = lambda x: print(x) or format(x, '.8f')
+
 J = os.path.join
 
 
@@ -154,6 +156,33 @@ class CLI(BaseMLCLI):
 
         # if not a.noshow:
         #     plt.show()
+
+    def run_p_value(self, a):
+        with open('data/result/roc_folds_mean_all.json', mode='r') as f:
+            s = json.load(f)
+        arm1 = "b0_full_0"
+        arm2 = "b0_full_8"
+        arm3 = "gbm"
+
+        result = {}
+        for (a, b) in ((arm1, arm2), (arm1, arm3), (arm2, arm3)):
+            tvalue, pvalue = ttest_ind(s[a], s[b])
+            result[f'{a}_vs_{b}'] = {
+                'tvalue': tvalue,
+                'pvalue': pvalue,
+            }
+
+        s['result'] = result
+        with open(f'data/result/roc_folds_mean_all2.json', 'w', encoding='utf-8') as f:
+            json.dump(s, f, indent=2)
+
+        # plt.ylabel('Sensitivity')
+        # plt.xlabel('1 - Specificity')
+        # plt.legend(loc='lower right')
+        # plt.savefig(f'data/result/roc_folds_mean_{a.model}.png')
+        print(result)
+
+
 
     def run_assign_folds_to_table(self, a):
         df = pd.read_excel('data/table.xlsx', index_col=0)
