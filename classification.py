@@ -6,6 +6,7 @@ import math
 import numpy as np
 from tqdm import tqdm
 import pandas as pd
+from matplotlib import pyplot as plt
 from PIL import Image
 from pydantic import Field
 from sklearn import metrics as skmetrics
@@ -16,12 +17,16 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from timm.scheduler.cosine_lr import CosineLRScheduler
 
+import pytorch_grad_cam as CAM
+from pytorch_grad_cam.utils.image import show_cam_on_image
+from pytorch_grad_cam.utils.model_targets import BinaryClassifierOutputTarget
+
 from endaaman.ml import BaseMLCLI, BaseTrainer, BaseTrainerConfig, BaseDLArgs, Checkpoint, roc_auc_ci
 from endaaman.ml.metrics import BaseMetrics
 
 from common import cols_clinical, cols_measure, col_target
 from models import TimmModelWithFeatures, TimmModel, LinearModel
-from datasets import XRDataset, XRROIDataset, FeatureDataset
+from datasets import XRDataset, XRROIDataset, FeatureDataset, IMAGE_MEAN, IMAGE_STD
 
 J = os.path.join
 
@@ -160,7 +165,7 @@ class CLI(BaseMLCLI):
 
         print('Dataset type:', DS)
 
-        basedir = 'data/folds/bag' if a.fold is None else f'data/folds/fold{a.fold}'
+        basedir = 'data/folds/bag' if a.fold is None else f'data/folds6/fold{a.fold}'
         dss = [DS(
             target=t,
             basedir=J(basedir, t),
@@ -291,6 +296,40 @@ class CLI(BaseMLCLI):
 
     #     print('done')
 
+
+    class CamArgs(CommonArgs):
+        experiment_dir: str = Field(..., cli=('--exp-dir', '-e'))
+        src: str
+        gt: int
+
+    def run_cam(self, a):
+        checkpoint:Checkpoint = torch.load(J(a.experiment_dir, 'checkpoint_best.pt'))
+
+        rest_path, model_name = os.path.split(a.experiment_dir)
+
+        model_name = re.match(r'^(.*)_fold.*$', model_name)[1]
+
+        model = TimmModelWithFeatures(name=model_name, with_features=False)
+        model.load_state_dict(checkpoint.model_state)
+
+        image = Image.open(a.src).resize((512, 512))
+        t = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(mean=IMAGE_MEAN, std=IMAGE_STD)
+        ])(image.convert('L'))[None, ...]
+
+        result = model(t, features=None)
+
+        gradcam = CAM.GradCAM(
+            model=model,
+            target_layers=[model.base.conv_head],
+            use_cuda=False)
+        targets = [BinaryClassifierOutputTarget(a.gt)]
+        mask = gradcam(input_tensor=t, targets=targets)[0]
+
+        visualization = show_cam_on_image(np.array(image)/255, mask, use_rgb=True)
+        plt.imshow(visualization)
+        plt.show()
 
 if __name__ == '__main__':
     cli = CLI()

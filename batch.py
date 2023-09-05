@@ -1,6 +1,7 @@
 import os
 from glob import glob
 import json
+from itertools import combinations
 
 import torch
 from PIL import Image
@@ -9,7 +10,7 @@ import pandas as pd
 import matplotlib
 from matplotlib import pyplot as plt
 from sklearn import metrics as skmetrics
-from scipy.stats import ttest_ind
+from scipy import stats
 import numpy as np
 from pydantic import Field
 import lightgbm as lgb
@@ -141,7 +142,7 @@ class CLI(BaseMLCLI):
             # plt.plot(fpr, tpr, label=f'{name} AUC:{auc:.3f}({lower:.3f}-{upper:.3f})')
             plt.plot(fpr, tpr, label=f'{mode} AUC:{auc:.3f}')
 
-        tvalue, pvalue = ttest_ind(result[arm1], result[arm2])
+        tvalue, pvalue = stats.ttest_ind(result[arm1], result[arm2])
         result['tvalue'] = tvalue
         result['pvalue'] = pvalue
 
@@ -160,14 +161,22 @@ class CLI(BaseMLCLI):
     def run_p_value(self, a):
         with open('data/result/roc_folds_mean_all.json', mode='r') as f:
             s = json.load(f)
-        arm1 = "b0_full_0"
-        arm2 = "b0_full_8"
-        arm3 = "gbm"
+
+        names = []
+        ee = s['experiments']
+
+        for i, e in enumerate(ee):
+            names.append(e['name'])
+            aa = e['aucs']
+            ee[i]['mean'] = np.mean(aa)
+            lower, higher = stats.norm.interval(0.95, loc=np.mean(aa), scale=np.sqrt(stats.tvar(aa)/len(aa)))
+            ee[i]['ci'] = [lower, higher]
 
         result = {}
-        for (a, b) in ((arm1, arm2), (arm1, arm3), (arm2, arm3)):
-            tvalue, pvalue = ttest_ind(s[a], s[b])
-            result[f'{a}_vs_{b}'] = {
+        for (a, b) in combinations(range(len(ee)), 2):
+            tvalue, pvalue = stats.ttest_ind(ee[a]['aucs'], ee[b]['aucs'])
+            a_name, b_name = ee[a]['name'], ee[b]['name']
+            result[f'{a_name}_vs_{b_name}'] = {
                 'tvalue': tvalue,
                 'pvalue': pvalue,
             }
@@ -207,9 +216,9 @@ class CLI(BaseMLCLI):
             y_valid = df_valid[col_target]
 
             train_set = lgb.Dataset(x_train, label=y_train, categorical_feature=[])
-            valid_sets = [train_set]
-            # valid_data = lgb.Dataset(x_valid, label=y_valid, categorical_feature=[])
-            # valid_sets += [valid_data]
+            # valid_sets = [train_set]
+            valid_data = lgb.Dataset(x_valid, label=y_valid, categorical_feature=[])
+            valid_sets = [valid_data]
 
             model = lgb.train(
                 params={

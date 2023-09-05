@@ -92,8 +92,8 @@ class TimmModelWithFeatures(nn.Module):
             return torch.softmax(x, dim=1)
         return torch.sigmoid(x)
 
-    def forward(self, x, features, activate=True):
-        if self.with_features == 0:
+    def forward(self, x, features=None, activate=True):
+        if not self.with_features:
             x = self.base.forward_features(x)
             x = self.base.forward_head(x, pre_logits=True)
             x = self.fc_base(x)
