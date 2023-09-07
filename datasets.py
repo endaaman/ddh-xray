@@ -67,7 +67,7 @@ BASE_AUGS = [
 ]
 
 
-def read_label_as_df(path):
+def read_label_as_df(path, size=ORIGINAL_IMAGE_SIZE):
     with open(path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
 
@@ -76,7 +76,7 @@ def read_label_as_df(path):
     for line in lines:
         parted  = line.split(' ')
         class_id = int(parted[0]) + 1
-        center_x, center_y, w, h = [float(v) * ORIGINAL_IMAGE_SIZE for v in parted[1:]]
+        center_x, center_y, w, h = [float(v) * size for v in parted[1:]]
         data.append([
             # convert yolo to pascal voc
             center_x - w / 2,

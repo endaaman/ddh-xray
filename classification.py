@@ -7,7 +7,7 @@ import numpy as np
 from tqdm import tqdm
 import pandas as pd
 from matplotlib import pyplot as plt
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from pydantic import Field
 from sklearn import metrics as skmetrics
 import torch
@@ -26,7 +26,7 @@ from endaaman.ml.metrics import BaseMetrics
 
 from common import cols_clinical, cols_measure, col_target, load_data
 from models import TimmModelWithFeatures, TimmModel, LinearModel
-from datasets import XRDataset, XRROIDataset, FeatureDataset, IMAGE_MEAN, IMAGE_STD
+from datasets import XRDataset, XRROIDataset, FeatureDataset, IMAGE_MEAN, IMAGE_STD, read_label_as_df
 
 J = os.path.join
 
@@ -342,11 +342,14 @@ class CLI(BaseMLCLI):
         model.load_state_dict(checkpoint.model_state)
 
         transform = transforms.Compose([
+            # transforms.Resize((512, 512,)),
+            # transforms.CenterCrop((512, 512,)),
             transforms.ToTensor(),
             transforms.Normalize(mean=IMAGE_MEAN, std=IMAGE_STD)
         ])
+        center_crop = transforms.CenterCrop((512, 512))
 
-        gradcam = CAM.GradCAM(
+        gradcam = CAM.GradCAMElementWise(
             model=model,
             target_layers=[model.base.conv_head],
             use_cuda=False)
@@ -357,7 +360,9 @@ class CLI(BaseMLCLI):
         image_dir = f'data/folds6/fold{a.fold}/test/images'
         for p in tqdm(sorted(glob(J(image_dir, '*.jpg')))):
             id = os.path.splitext(os.path.basename(p))[0]
-            image = Image.open(f'data/images/{id}.jpg').resize((512, 512))
+            image = Image.open(f'data/images/{id}.jpg')
+            # image = image.resize((512, 512))
+            image = center_crop(image)
             gt = df[df.index == id].iloc[0]['treatment'] > 0.5
             t = transform(image.convert('L'))[None, ...]
             mask = gradcam(input_tensor=t, targets=[BinaryClassifierOutputTarget(gt)])[0]
@@ -371,8 +376,80 @@ class CLI(BaseMLCLI):
             vis_img.save(J(dest_dir, f'{id}_vis_{label}.png'))
 
 
-            # plt.imshow(visualization)
+    class CropCamsArgs(CommonArgs):
+        render: bool = Field(False, cli=('--render', ))
+
+    def run_crop_cams(self, a):
+        df = load_data(0, True, a.seed)['all']
+        data = []
+        font = ImageFont.truetype('/usr/share/fonts/ubuntu/Ubuntu-L.ttf', 20)
+
+        plt.figure(figsize=[4,8])
+        for id, row in tqdm(df.iterrows(), total=len(df)):
+            bb = read_label_as_df(f'data/labels/{id}.txt')
+            gt = row.treatment > 0.5
+            img = Image.open(f'data/images/{id}.jpg')
+            label = 'pos' if gt else 'neg'
+            vis_img = Image.open(f'out/cams/crop/{id}_vis_{label}.png')
+            mask_img = Image.open(f'out/cams/crop/{id}_mask_{label}.png')
+            right_bbs = bb[0:3]
+            left_bbs = bb[3:]
+            right_box = np.array([
+                np.min(right_bbs['x0']),
+                np.min(right_bbs['y0']),
+                np.max(right_bbs['x1']),
+                np.max(right_bbs['y1'])
+            ])
+            left_box = np.array([
+                np.min(left_bbs['x0']),
+                np.min(left_bbs['y0']),
+                np.max(left_bbs['x1']),
+                np.max(left_bbs['y1'])
+            ])
+            o = (624 - 512)//2
+            right_box -= np.array([o]*4)
+            left_box -= np.array([o]*4)
+            right_box = right_box.round().astype(int)
+            left_box = left_box.round().astype(int)
+
+            mask_arr = np.array(mask_img)
+            # mask_arr = (mask_arr - np.min(mask_arr)) / (np.max(np.max(mask_arr), 1) - np.min(mask_arr))
+
+            mask_arr = mask_arr / np.max([np.sum(mask_arr), 1]) * (512*512)
+            mask_on_right_roi = mask_arr[right_box[1]:right_box[3], right_box[0]:right_box[2]]
+            mask_on_left_roi = mask_arr[left_box[1]:left_box[3], left_box[0]:left_box[2]]
+            right_power = np.mean(mask_on_right_roi)
+            left_power = np.mean(mask_on_left_roi)
+
+            data.append({
+                'id': id,
+                'gt': label,
+                'bilateral': left_power+right_power,
+                'right': right_power,
+                'left': left_power,
+            })
+
+            if a.render:
+                draw = ImageDraw.Draw(vis_img)
+                draw.rectangle(tuple(right_box), outline='yellow', width=1)
+                draw.rectangle(tuple(left_box), outline='yellow', width=1)
+                draw.rectangle((0, 0, 300, 26), fill='black')
+                draw.text(
+                    (0, 0),
+                    f'{label}, left:{left_power:.4f} right:{right_power:.4f}',
+                    font=font, color='black')
+                vis_img.save(f'out/cams/cams_with_roi/{id}_draw.png')
+
+            # plt.subplot(3,1,1)
+            # plt.imshow(mask_on_left_roi)
+            # plt.subplot(3,1,2)
+            # plt.imshow(mask_on_right_roi)
+            # plt.subplot(3,1,3)
+            # plt.imshow(vis_img)
             # plt.show()
+
+        data = pd.DataFrame(data)
+        data.to_excel('out/cams/powers.xlsx')
 
 if __name__ == '__main__':
     cli = CLI()
