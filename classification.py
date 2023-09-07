@@ -304,8 +304,7 @@ class CLI(BaseMLCLI):
 
     def run_cam(self, a):
         checkpoint:Checkpoint = torch.load(J(a.experiment_dir, 'checkpoint_best.pt'))
-
-        rest_path, model_name = os.path.split(a.experiment_dir)
+        __rest_path, model_name = os.path.split(a.experiment_dir)
 
         model_name = re.match(r'^(.*)_fold.*$', model_name)[1]
 
@@ -317,19 +316,45 @@ class CLI(BaseMLCLI):
             transforms.ToTensor(),
             transforms.Normalize(mean=IMAGE_MEAN, std=IMAGE_STD)
         ])(image.convert('L'))[None, ...]
-
-        result = model(t, features=None)
-
+        # result = model(t, features=None)
         gradcam = CAM.GradCAM(
             model=model,
             target_layers=[model.base.conv_head],
             use_cuda=False)
         targets = [BinaryClassifierOutputTarget(a.gt)]
         mask = gradcam(input_tensor=t, targets=targets)[0]
-
         visualization = show_cam_on_image(np.array(image)/255, mask, use_rgb=True)
         plt.imshow(visualization)
         plt.show()
+
+    class CamFoldArgs(CommonArgs):
+        experiment_dir: str = Field(..., cli=('--exp-dir', '-e'))
+        fold: int
+
+    def run_cam_fold(self, a):
+        checkpoint:Checkpoint = torch.load(J(a.experiment_dir, 'checkpoint_best.pt'))
+        __rest_path, model_name = os.path.split(a.experiment_dir)
+
+        # TODO: cam foreach folds
+        # model_name = re.match(r'^(.*)_fold.*$', model_name)[1]
+        # model = TimmModelWithFeatures(name=model_name, with_features=False)
+        # model.load_state_dict(checkpoint.model_state)
+
+        # image = Image.open(a.src).resize((512, 512))
+        # t = transforms.Compose([
+        #     transforms.ToTensor(),
+        #     transforms.Normalize(mean=IMAGE_MEAN, std=IMAGE_STD)
+        # ])(image.convert('L'))[None, ...]
+        # # result = model(t, features=None)
+        # gradcam = CAM.GradCAM(
+        #     model=model,
+        #     target_layers=[model.base.conv_head],
+        #     use_cuda=False)
+        # targets = [BinaryClassifierOutputTarget(a.gt)]
+        # mask = gradcam(input_tensor=t, targets=targets)[0]
+        # visualization = show_cam_on_image(np.array(image)/255, mask, use_rgb=True)
+        # plt.imshow(visualization)
+        # plt.show()
 
 if __name__ == '__main__':
     cli = CLI()
