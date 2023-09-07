@@ -24,7 +24,7 @@ from pytorch_grad_cam.utils.model_targets import BinaryClassifierOutputTarget
 from endaaman.ml import BaseMLCLI, BaseTrainer, BaseTrainerConfig, BaseDLArgs, Checkpoint, roc_auc_ci
 from endaaman.ml.metrics import BaseMetrics
 
-from common import cols_clinical, cols_measure, col_target
+from common import cols_clinical, cols_measure, col_target, load_data
 from models import TimmModelWithFeatures, TimmModel, LinearModel
 from datasets import XRDataset, XRROIDataset, FeatureDataset, IMAGE_MEAN, IMAGE_STD
 
@@ -328,33 +328,51 @@ class CLI(BaseMLCLI):
         plt.show()
 
     class CamFoldArgs(CommonArgs):
-        experiment_dir: str = Field(..., cli=('--exp-dir', '-e'))
+        # experiment_dir: str = Field(..., cli=('--exp-dir', '-e'))
         fold: int
 
     def run_cam_fold(self, a):
-        checkpoint:Checkpoint = torch.load(J(a.experiment_dir, 'checkpoint_best.pt'))
-        __rest_path, model_name = os.path.split(a.experiment_dir)
+        df = load_data(0, True, a.seed)['all']
+        experiment_dir = J('out', 'classification_effnet', 'image', f'tf_efficientnet_b0_fold{a.fold}')
+        checkpoint:Checkpoint = torch.load(J(experiment_dir, 'checkpoint_best.pt'))
+        __rest_path, model_name = os.path.split(experiment_dir)
 
-        # TODO: cam foreach folds
-        # model_name = re.match(r'^(.*)_fold.*$', model_name)[1]
-        # model = TimmModelWithFeatures(name=model_name, with_features=False)
-        # model.load_state_dict(checkpoint.model_state)
+        model_name = re.match(r'^(.*)_fold.*$', model_name)[1]
+        model = TimmModelWithFeatures(name=model_name, with_features=False)
+        model.load_state_dict(checkpoint.model_state)
 
-        # image = Image.open(a.src).resize((512, 512))
-        # t = transforms.Compose([
-        #     transforms.ToTensor(),
-        #     transforms.Normalize(mean=IMAGE_MEAN, std=IMAGE_STD)
-        # ])(image.convert('L'))[None, ...]
-        # # result = model(t, features=None)
-        # gradcam = CAM.GradCAM(
-        #     model=model,
-        #     target_layers=[model.base.conv_head],
-        #     use_cuda=False)
-        # targets = [BinaryClassifierOutputTarget(a.gt)]
-        # mask = gradcam(input_tensor=t, targets=targets)[0]
-        # visualization = show_cam_on_image(np.array(image)/255, mask, use_rgb=True)
-        # plt.imshow(visualization)
-        # plt.show()
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(mean=IMAGE_MEAN, std=IMAGE_STD)
+        ])
+
+        gradcam = CAM.GradCAM(
+            model=model,
+            target_layers=[model.base.conv_head],
+            use_cuda=False)
+
+        dest_dir = f'out/cams/fold{a.fold}'
+        os.makedirs(dest_dir, exist_ok=True)
+
+        image_dir = f'data/folds6/fold{a.fold}/test/images'
+        for p in tqdm(sorted(glob(J(image_dir, '*.jpg')))):
+            id = os.path.splitext(os.path.basename(p))[0]
+            image = Image.open(f'data/images/{id}.jpg').resize((512, 512))
+            gt = df[df.index == id].iloc[0]['treatment'] > 0.5
+            t = transform(image.convert('L'))[None, ...]
+            mask = gradcam(input_tensor=t, targets=[BinaryClassifierOutputTarget(gt)])[0]
+
+            mask_img = Image.fromarray(mask*255).convert('L')
+            vis_arr = show_cam_on_image(np.array(image)/255, mask, use_rgb=True)
+            vis_img = Image.fromarray(vis_arr)
+
+            label = 'pos' if gt else 'neg'
+            mask_img.save(J(dest_dir, f'{id}_mask_{label}.png'))
+            vis_img.save(J(dest_dir, f'{id}_vis_{label}.png'))
+
+
+            # plt.imshow(visualization)
+            # plt.show()
 
 if __name__ == '__main__':
     cli = CLI()

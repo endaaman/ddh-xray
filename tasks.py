@@ -7,7 +7,8 @@ from endaaman.utils import prod_fmt
 @invoke.task
 def image_all_folds(c):
     cmds = prod_fmt(
-        'python classification.py image --model {MODEL} {FEATURES} --fold {FOLD} --name "{{}}_fold{FOLD}" --exp {EXP}',
+        'python classification.py image --model {MODEL} {FEATURES} --fold {FOLD}' \
+            ' --name "{{}}_fold{FOLD}" --exp {EXP} --epoch 50',
         {
             'EXP': ['classification_effnet'],
             'MODEL': [f'tf_efficientnet_b{b}' for b in [0]],
@@ -15,7 +16,7 @@ def image_all_folds(c):
             # 'MODEL': ['resnet34'],
             'FEATURES': [
                 '--lr 0.001 --mode image',
-                '--lr 0.001 --mode integrated',
+                # '--lr 0.001 --mode integrated',
             ],
             'FOLD': [1, 2, 3, 4, 5, 6],
         }
