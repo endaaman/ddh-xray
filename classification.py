@@ -407,8 +407,9 @@ class CLI(BaseMLCLI):
                 np.max(left_bbs['y1'])
             ])
             o = (624 - 512)//2
-            right_box -= np.array([o]*4)
-            left_box -= np.array([o]*4)
+            offset = np.array([o]*4)
+            right_box -= offset
+            left_box -= offset
             right_box = right_box.round().astype(int)
             left_box = left_box.round().astype(int)
 
@@ -431,14 +432,25 @@ class CLI(BaseMLCLI):
 
             if a.render:
                 draw = ImageDraw.Draw(vis_img)
+
+                for i, bb in left_bbs.iterrows():
+                    v = bb.values[:4] - offset
+                    draw.rectangle(tuple(v.round().astype(int)), outline='red', width=2)
+                for i, bb in right_bbs.iterrows():
+                    v = bb.values[:4] - offset
+                    draw.rectangle(tuple(v.round().astype(int)), outline='red', width=2)
+
                 draw.rectangle(tuple(right_box), outline='yellow', width=1)
                 draw.rectangle(tuple(left_box), outline='yellow', width=1)
+
                 draw.rectangle((0, 0, 300, 26), fill='black')
                 draw.text(
                     (0, 0),
                     f'{label}, left:{left_power:.4f} right:{right_power:.4f}',
                     font=font, color='black')
+
                 vis_img.save(f'out/cams/cams_with_roi/{id}_draw.png')
+                print(f'out/cams/cams_with_roi/{id}_draw.png')
 
             # plt.subplot(3,1,1)
             # plt.imshow(mask_on_left_roi)
