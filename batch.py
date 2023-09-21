@@ -7,6 +7,7 @@ import torch
 from PIL import Image
 from tqdm import tqdm
 import pandas as pd
+import seaborn as sns
 import matplotlib
 from matplotlib import pyplot as plt
 from sklearn import metrics as skmetrics
@@ -250,6 +251,56 @@ class CLI(BaseMLCLI):
             print(fold, auc)
 
 
+    def run_plot_powers(self, a):
+        df_org = pd.read_excel('data/cams/powers_aggr.xlsx', usecols=list(range(7))+list(range(8,17)), index_col=0)
+        print(df_org.columns)
+
+        col_value = 'CAM Score'
+
+        # bilateral Positive vs Negative
+        df_pos_bilateral = df_org[['pos bilateral']] \
+            .dropna() \
+            .rename(columns={'pos bilateral': col_value})
+        df_pos_bilateral['name'] = 'Positive'
+
+        df_neg_bilateral = df_org[['neg bilateral']] \
+            .dropna() \
+            .rename(columns={'neg bilateral': col_value})
+        df_neg_bilateral['name'] = 'Negative'
+
+        df_bilateral = pd.concat([df_neg_bilateral, df_pos_bilateral])
+        u = stats.mannwhitneyu(df_pos_bilateral[col_value], df_neg_bilateral[col_value], alternative='two-sided')
+        print('Bilateral / U test', u)
+
+        # affected vs healthy
+        df_affected = df_org[['affected']] \
+            .dropna() \
+            .rename(columns={'affected': col_value})
+        df_affected['name'] = 'Affected'
+
+        df_healthy = df_org[['healthy']] \
+            .dropna() \
+            .rename(columns={'healthy': col_value})
+        df_healthy['name'] = 'Healthy'
+
+        df_side = pd.concat([df_healthy, df_affected])
+        u = stats.wilcoxon(df_affected[col_value], df_healthy[col_value], alternative='two-sided')
+        print('Affected vs Healthy / wilcoxon', u)
+
+        fig, axes = plt.subplots(1, 2, sharey=True, figsize=(6, 8))
+
+        ax = axes[0]
+        # sns.boxenplot(data=df_bilateral, x='name', y=col_value, ax=ax)
+        sns.boxplot(data=df_bilateral, x='name', y=col_value, ax=ax)
+        ax.set(xlabel='Bilateral')
+        # sns.swarmplot(data=df_bilateral, x='name', y=col_value)
+        # sns.stripplot(data=df, x='name', y=col_value, jitter=True, color='black', ax=ax)
+
+        ax = axes[1]
+        # sns.boxenplot(data=df_side, x='name', y=col_value, ax=ax)
+        sns.boxplot(data=df_side, x='name', y=col_value, ax=ax)
+        ax.set(xlabel='Positive cases')
+        plt.show()
 
 
 
