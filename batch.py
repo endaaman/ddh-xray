@@ -10,6 +10,7 @@ import pandas as pd
 import seaborn as sns
 import matplotlib
 from matplotlib import pyplot as plt
+import matplotlib.cm as cm
 from sklearn import metrics as skmetrics
 from scipy import stats
 import numpy as np
@@ -23,10 +24,25 @@ from common import col_target, cols_feature, cols_measure, load_data
 # matplotlib.use('TkAgg')
 
 
+sns.set_style('white')
+sns.set_palette('tab10')
+# default_palette = sns.color_palette()
+# brightened_palette = sns.color_palette("pastel", n_colors=len(default_palette) - 2)
+# sns.set_palette(brightened_palette)
+
+# plt.rcParams['font.family'] = 'Times New Roman'
+# plt.rcParams['font.family'] = 'Arial'
+# plt.rcParams["font.size"] = 15 # 全体のフォントサイズが変更されます。
+
+plt.rcParams['xtick.direction'] = 'in' #x軸の目盛りの向き
+plt.rcParams['ytick.direction'] = 'in' #y軸の目盛りの向き
+plt.rcParams["xtick.minor.visible"] = True  #x軸補助目盛りの追加
+plt.rcParams["ytick.minor.visible"] = True  #y軸補助目盛りの追加
+plt.rcParams['xtick.bottom'] = True  #x軸の上部目盛り
+plt.rcParams['ytick.left'] = True  #y軸の右部目盛り
+
 json.encoder.FLOAT_REPR = lambda x: print(x) or format(x, '.8f')
-
 J = os.path.join
-
 
 def permutation_test_between_clfs(y_test, pred_proba_1, pred_proba_2, nsamples=1000):
     print(nsamples)
@@ -45,7 +61,15 @@ def permutation_test_between_clfs(y_test, pred_proba_1, pred_proba_2, nsamples=1
 
 
 class CLI(BaseMLCLI):
-    class RocArgs(BaseMLCLI.CommonArgs):
+    class CommonArgs(BaseMLCLI.CommonArgs):
+        pass
+
+    def run_demographic(self, a):
+        dfs = load_data(0, True, a.seed)
+        df = dfs['all']
+        print(df)
+
+    class RocArgs(CommonArgs):
         target: str = 'val'
 
     def run_roc(self, a:RocArgs):
@@ -86,7 +110,7 @@ class CLI(BaseMLCLI):
         plt.savefig('out/roc.png')
         plt.show()
 
-    class CenterCropArgs(BaseMLCLI.CommonArgs):
+    class CenterCropArgs(CommonArgs):
         size: int
 
     def run_center_crop(self, a:CenterCropArgs):
@@ -104,7 +128,7 @@ class CLI(BaseMLCLI):
             i = i.crop((x0, y0, x1, y1))
             i.save(f'{d}/{name}')
 
-    class RocFoldsMeanArgs(BaseMLCLI.CommonArgs):
+    class RocFoldsMeanArgs(CommonArgs):
         noshow: bool = Field(False, cli=('--noshow', ))
         model:str = 'resnet34'
         basedir: str = 'out/classification_resnet'
@@ -203,10 +227,18 @@ class CLI(BaseMLCLI):
             df.loc[df.index.isin(ii), 'fold'] = fold
         df.to_excel('data/table2.xlsx')
 
-    def run_gbm_by_folds(self, a):
+
+    class GbmRocByFoldsArgs(CommonArgs):
+        noshow: bool = Field(False, cli=('--noshow', ))
+
+    def run_gbm_roc_by_folds(self, a):
         # df = pd.read_excel('data/table.xlsx', index_col=0)
         dfs = load_data(0, True, a.seed)
         df = dfs['all']
+
+        data = []
+        ii = []
+
         for fold in range(1,7):
             df_train = df[df['fold'] != fold]
             df_valid = df[df['fold'] == fold]
@@ -248,14 +280,124 @@ class CLI(BaseMLCLI):
 
             fpr, tpr, thresholds = skmetrics.roc_curve(y_valid, pred_valid)
             auc = skmetrics.auc(fpr, tpr)
-            print(fold, auc)
+            data.append({
+                'auc': auc,
+                'fpr': fpr,
+                'tpr': tpr,
+            })
+
+            i = model.feature_importance(importance_type='gain')
+            # i = pd.DataFrame(data=i, index=cols_measure)
+            ii.append(i)
+            print(auc)
+
+        print()
+        data = pd.DataFrame(data)
+        print(np.mean(data['auc']))
+
+        ii = np.array(ii)
+        ii = pd.DataFrame(data=ii, columns=cols_measure, index=[f'fold{f}' for f in range(1,7)])
+        ii.to_excel('out/importance.xlsx')
+        print(ii)
+
+        self.draw_roc_with_ci(
+            data['fpr'], data['tpr'],
+            std_scale=1,
+            title='Setting: B\nClinical measurements only',
+            name='roc_b.png',
+            color=['forestgreen', 'lightgreen'],
+            show=not a.noshow
+        )
+
+
+    class ImageRocByFoldsArgs(CommonArgs):
+        mode: str = 'image'
+        depth: str = 'b0'
+        noshow: bool = Field(False, cli=('--noshow', ))
+
+    def run_image_roc_by_folds(self, a):
+        # dfs = load_data(0, True, a.seed)
+        # df = dfs['all']
+
+        base = 'out/classification_effnet_final'
+        data = []
+        for fold in range(1,7):
+            pred_path = f'{base}/{a.mode}/tf_efficientnet_{a.depth}_fold{fold}/predictions.pt'
+            pred = torch.load(pred_path, map_location=torch.device('cpu'))
+            gts = pred['val_gts'].flatten()
+            preds = pred['val_preds'].flatten()
+            fpr, tpr, thresholds = skmetrics.roc_curve(gts.numpy(), preds.numpy())
+            auc = skmetrics.auc(fpr, tpr)
+            data.append({
+                'auc': auc,
+                'fpr': fpr,
+                'tpr': tpr,
+            })
+            print(auc)
+        data = pd.DataFrame(data)
+        print()
+        print(np.mean(data['auc']))
+
+        if a.mode == 'image':
+            name = f'roc_a_{a.depth}.png'
+            title = f'Setting: A\nXp image only'
+            color=['royalblue', 'lightblue']
+        else:
+            name = f'roc_c_{a.depth}.png'
+            title = f'Setting: C\nXp image + Clinical measurements'
+            color=['crimson', 'lightcoral']
+
+        self.draw_roc_with_ci(
+            data['fpr'], data['tpr'],
+            std_scale=1,
+            title=title,
+            color=color,
+            name=name,
+            show=not a.noshow
+        )
+
+
+    def draw_roc_with_ci(self, fprs, tprs, title='{}',
+                         color=['blue', 'lightblue'], std_scale=2, name=None, show=False):
+        l = []
+        mean_fpr = np.linspace(0, 1, 100)
+        aucs = []
+        for (fpr, tpr) in zip(fprs, tprs):
+            l.append(np.interp(mean_fpr, fpr, tpr))
+            aucs.append(skmetrics.auc(fpr, tpr))
+
+        tprs = np.array(l)
+        mean_tpr = tprs.mean(axis=0)
+        std_tpr = tprs.std(axis=0)
+
+        plt.figure(figsize=(6, 5), dpi=300)
+        mean_auc = np.mean(aucs)
+        std_auc = np.std(aucs)
+        plt.plot(mean_fpr, mean_tpr, label=f'AUC:{mean_auc:0.3f} ± {std_auc:0.3f}', color=color[0])
+
+        plt.fill_between(
+            mean_fpr,
+            mean_tpr - std_scale * std_tpr,
+            mean_tpr + std_scale * std_tpr,
+            color=color[1], alpha=0.5, label='± 1.0 s.d.')
+        plt.plot([0, 1], [0, 1], linestyle='--', color='gray', linewidth=1)
+        plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.0])
+        plt.ylabel('Sensitivity')
+        plt.xlabel('1 - Specificity')
+        plt.legend(loc='lower right')
+        plt.title(title.format('ROC curve'))
+        if name:
+            plt.savefig(J('out/fig2_rocs', name))
+        if show:
+            plt.show()
 
 
     def run_plot_powers(self, a):
         df_org = pd.read_excel('data/cams/powers_aggr.xlsx', usecols=list(range(7))+list(range(8,17)), index_col=0)
         print(df_org.columns)
 
-        col_value = 'CAM Score'
+        col_value = 'CAM score'
 
         # bilateral Positive vs Negative
         df_pos_bilateral = df_org[['pos bilateral']] \
@@ -287,19 +429,48 @@ class CLI(BaseMLCLI):
         u = stats.wilcoxon(df_affected[col_value], df_healthy[col_value], alternative='two-sided')
         print('Affected vs Healthy / wilcoxon', u)
 
-        fig, axes = plt.subplots(1, 2, sharey=True, figsize=(6, 8))
+
+        # negative: left vs right
+        df_neg_left = df_org[['neg left']] \
+            .dropna() \
+            .rename(columns={'neg left': col_value})
+        df_neg_left['name'] = 'Left'
+
+        df_neg_right = df_org[['neg right']] \
+            .dropna() \
+            .rename(columns={'neg right': col_value})
+        df_neg_right['name'] = 'Right'
+
+        df_lr = pd.concat([df_neg_left, df_neg_right])
+        u = stats.wilcoxon(df_neg_left[col_value], df_neg_right[col_value], alternative='two-sided')
+        print('Negative Left vs Right / wilcoxon', u)
+
+
+        def plot(ax, data):
+            # ax.axhline(y=1.0, color='grey', linewidth=.5)
+            # ax.grid(axis='y')
+            sns.barplot(data=data, x='name', y=col_value, ax=ax,
+                        capsize=.1, errorbar='ci',
+                        # errcolor='darkgrey',
+                        )
+
+        sns.set_palette(sns.color_palette())
+        fig, axes = plt.subplots(1, 3, sharey=True, figsize=(6, 8), dpi=300)
+        fig.suptitle('Comparison of CAM scores')
 
         ax = axes[0]
-        # sns.boxenplot(data=df_bilateral, x='name', y=col_value, ax=ax)
-        sns.boxplot(data=df_bilateral, x='name', y=col_value, ax=ax)
+        plot(ax, df_bilateral)
         ax.set(xlabel='Bilateral')
-        # sns.swarmplot(data=df_bilateral, x='name', y=col_value)
-        # sns.stripplot(data=df, x='name', y=col_value, jitter=True, color='black', ax=ax)
 
         ax = axes[1]
-        # sns.boxenplot(data=df_side, x='name', y=col_value, ax=ax)
-        sns.boxplot(data=df_side, x='name', y=col_value, ax=ax)
-        ax.set(xlabel='Positive cases')
+        plot(ax, df_side)
+        ax.set(xlabel='Positive cases', ylabel=None)
+
+        ax = axes[2]
+        plot(ax, df_lr)
+        ax.set(xlabel='Negative cases', ylabel=None)
+
+        plt.savefig('out/fig3_cam_score/bars.png')
         plt.show()
 
 

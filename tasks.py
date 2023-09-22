@@ -69,3 +69,22 @@ def fold1(c):
 def p(c):
     cmds = prod_fmt('fold:{fold} feature:{feature}', {'fold': [0, 1], 'feature': [0, 8]})
     print(cmds)
+
+@invoke.task
+def plot_rocs(c):
+    cmds = [
+        # 'python batch.py image-roc-by-folds --mode image --depth b0',
+        # 'python batch.py gbm-roc-by-folds',
+        # 'python batch.py image-roc-by-folds --mode integrated --depth b0',
+
+        'python batch.py gbm-roc-by-folds --noshow',
+        'python batch.py image-roc-by-folds --mode image --depth b0 --noshow',
+        'python batch.py image-roc-by-folds --mode image --depth b4 --noshow',
+        'python batch.py image-roc-by-folds --mode image --depth b8 --noshow',
+        'python batch.py image-roc-by-folds --mode integrated --depth b0 --noshow',
+        'python batch.py image-roc-by-folds --mode integrated --depth b4 --noshow',
+        'python batch.py image-roc-by-folds --mode integrated --depth b8 --noshow',
+    ]
+    for cmd in cmds:
+        print('CMD', cmd)
+        c.run(cmd)
