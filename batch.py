@@ -319,7 +319,7 @@ class CLI(BaseMLCLI):
         # dfs = load_data(0, True, a.seed)
         # df = dfs['all']
 
-        base = 'out/classification_effnet_final'
+        base = 'data/result/classification_effnet_final'
         data = []
         for fold in range(1,7):
             pred_path = f'{base}/{a.mode}/tf_efficientnet_{a.depth}_fold{fold}/predictions.pt'
