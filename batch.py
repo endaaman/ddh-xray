@@ -270,7 +270,7 @@ class CLI(BaseMLCLI):
                 valid_sets=valid_sets,
                 # early_stopping_rounds=150,
                 callbacks=[
-                    lgb.early_stopping(stopping_rounds=10, verbose=False),
+                    lgb.early_stopping(stopping_rounds=50, verbose=False),
                     lgb.log_evaluation(False)
                 ],
                 categorical_feature=[],
