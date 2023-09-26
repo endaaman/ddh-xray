@@ -227,18 +227,9 @@ class CLI(BaseMLCLI):
             df.loc[df.index.isin(ii), 'fold'] = fold
         df.to_excel('data/table2.xlsx')
 
-
-    class GbmRocByFoldsArgs(CommonArgs):
-        noshow: bool = Field(False, cli=('--noshow', ))
-
-    def run_gbm_roc_by_folds(self, a):
-        # df = pd.read_excel('data/table.xlsx', index_col=0)
-        dfs = load_data(0, True, a.seed)
-        df = dfs['all']
-
+    def train_gbm(self, df, seed):
         data = []
         ii = []
-
         for fold in range(1,7):
             df_train = df[df['fold'] != fold]
             df_valid = df[df['fold'] == fold]
@@ -258,8 +249,8 @@ class CLI(BaseMLCLI):
                     'objective': 'binary',
                     'num_threads': -1,
                     'max_depth': 3,
-                    'bagging_seed': a.seed,
-                    'random_state': a.seed,
+                    'bagging_seed': seed,
+                    'random_state': seed,
                     'boosting': 'gbdt',
                     'metric': 'auc',
                     'verbosity': -1,
@@ -278,44 +269,62 @@ class CLI(BaseMLCLI):
 
             pred_valid = model.predict(x_valid, num_iteration=model.best_iteration)
 
-            fpr, tpr, thresholds = skmetrics.roc_curve(y_valid, pred_valid)
-            auc = skmetrics.auc(fpr, tpr)
+            fpr, tpr, __ = skmetrics.roc_curve(y_valid, pred_valid)
+            precision, recall, __ = skmetrics.precision_recall_curve(y_valid, pred_valid)
             data.append({
-                'auc': auc,
                 'fpr': fpr,
                 'tpr': tpr,
+                'precision': precision,
+                'recall': recall,
             })
-
             i = model.feature_importance(importance_type='gain')
             # i = pd.DataFrame(data=i, index=cols_measure)
             ii.append(i)
-            print(auc)
 
-        print()
         data = pd.DataFrame(data)
-        print(np.mean(data['auc']))
-
         ii = np.array(ii)
         ii = pd.DataFrame(data=ii, columns=cols_measure, index=[f'fold{f}' for f in range(1,7)])
-        ii.to_excel('out/importance.xlsx')
-        print(ii)
+        return data, ii
 
-        self.draw_roc_with_ci(
-            data['fpr'], data['tpr'],
+    class GbmCurveByFoldsArgs(CommonArgs):
+        curve: str = Field(..., regex=r'^roc|pr$')
+        noshow: bool = Field(False, cli=('--noshow', ))
+
+    def run_gbm_curve_by_folds(self, a):
+        # df = pd.read_excel('data/table.xlsx', index_col=0)
+        dfs = load_data(0, True, a.seed)
+        df = dfs['all']
+
+        data, ii = self.train_gbm(df, a.seed)
+        ii.to_excel('out/importance.xlsx')
+
+        plt.figure(figsize=(6, 5), dpi=300)
+
+        if a.curve == 'roc':
+            xx, yy = data['fpr'], data['tpr'],
+            draw = self.draw_roc_common
+        else:
+            xx, yy = data['precision'], data['recall'],
+            draw = self.draw_pr_common
+        self.draw_curve_with_ci(
+            xx, yy,
             std_scale=1,
-            title='Setting: B\nClinical measurements only',
-            name='roc_b.png',
             color=['forestgreen', 'lightgreen'],
+        )
+        draw(
+            title='Setting: B\nClinical measurements only',
+            name=f'{a.curve}_b.png',
             show=not a.noshow
         )
 
 
-    class ImageRocByFoldsArgs(CommonArgs):
+    class ImageCurveByFoldsArgs(CommonArgs):
+        curve: str = Field(..., regex=r'^roc|pr$')
         mode: str = 'image'
         depth: str = 'b0'
         noshow: bool = Field(False, cli=('--noshow', ))
 
-    def run_image_roc_by_folds(self, a):
+    def run_image_curve_by_folds(self, a):
         # dfs = load_data(0, True, a.seed)
         # df = dfs['all']
 
@@ -327,68 +336,196 @@ class CLI(BaseMLCLI):
             gts = pred['val_gts'].flatten()
             preds = pred['val_preds'].flatten()
             fpr, tpr, thresholds = skmetrics.roc_curve(gts.numpy(), preds.numpy())
-            auc = skmetrics.auc(fpr, tpr)
+            precision, recall, thresholds = skmetrics.precision_recall_curve(gts.numpy(), preds.numpy())
             data.append({
-                'auc': auc,
                 'fpr': fpr,
                 'tpr': tpr,
+                'recall': recall,
+                'precision': precision,
             })
-            print(auc)
         data = pd.DataFrame(data)
-        print()
-        print(np.mean(data['auc']))
+        # print()
+        # print(np.mean(data['auc']))
 
         if a.mode == 'image':
-            name = f'roc_a_{a.depth}.png'
+            name = f'{a.curve}_a_{a.depth}.png'
             title = f'Setting: A\nXp image only'
             color=['royalblue', 'lightblue']
         else:
-            name = f'roc_c_{a.depth}.png'
+            name = f'{a.curve}_c_{a.depth}.png'
             title = f'Setting: C\nXp image + Clinical measurements'
             color=['crimson', 'lightcoral']
 
-        self.draw_roc_with_ci(
-            data['fpr'], data['tpr'],
+        plt.figure(figsize=(6, 5), dpi=300)
+        if a.curve == 'roc':
+            xx, yy = data['fpr'], data['tpr']
+            draw = self.draw_roc_common
+        else:
+            xx, yy = data['precision'], data['recall']
+            draw = self.draw_pr_common
+        self.draw_curve_with_ci(
+            xx, yy,
             std_scale=1,
-            title=title,
             color=color,
+        )
+        draw(
+            title=title,
             name=name,
             show=not a.noshow
         )
 
+    class AllCurvesArgs(CommonArgs):
+        curve: str = Field(..., regex=r'^roc|pr$')
+        depth: str = 'b0'
+        target: str = Field('roc', regex=r'^roc|bar$')
+        noshow: bool = Field(False, cli=('--noshow', ))
 
-    def draw_roc_with_ci(self, fprs, tprs, title='{}',
-                         color=['blue', 'lightblue'], std_scale=2, name=None, show=False):
+    def run_all_curves(self, a):
+        base = 'data/result/classification_effnet_final'
+        data_A = []
+        data_C = []
+        for fold in range(1,7):
+            for mode, data in [('image', data_A), ('integrated', data_C)]:
+                pred_path = f'{base}/{mode}/tf_efficientnet_{a.depth}_fold{fold}/predictions.pt'
+                pred = torch.load(pred_path, map_location=torch.device('cpu'))
+                gts = pred['val_gts'].flatten()
+                preds = pred['val_preds'].flatten()
+                fpr, tpr, __ = skmetrics.roc_curve(gts.numpy(), preds.numpy())
+                precision, recall, __ = skmetrics.precision_recall_curve(gts.numpy(), preds.numpy())
+                data.append({
+                    'fpr': fpr,
+                    'tpr': tpr,
+                    'recall': recall,
+                    'precision': precision,
+                })
+        data_A = pd.DataFrame(data_A)
+        data_C = pd.DataFrame(data_C)
+
+        dfs = load_data(0, True, a.seed)
+        df = dfs['all']
+        data_B, __ii = self.train_gbm(df, a.seed)
+
+
+        if a.target == 'roc':
+            plt.figure(figsize=(6, 5), dpi=300)
+            recipe = (
+                ('A', data_A, ['royalblue', 'lightblue']),
+                ('B', data_B, ['forestgreen', 'lightgreen']),
+                ('C', data_C, ['crimson', 'lightcoral']),
+            )
+            for (code, data, c) in recipe:
+                if a.curve == 'roc':
+                    xx, yy = data['fpr'], data['tpr']
+                else:
+                    xx, yy = data['precision'], data['recall']
+                self.draw_curve_with_ci(
+                    xx, yy, label='Setting '+code+' ({})',
+                    std_scale=1,
+                    color=c,
+                )
+            draw = self.draw_roc_common if a.curve == 'roc' else self.draw_pr_common
+            draw(
+                title=a.curve.upper() + ' curve',
+                name=f'all_{a.curve}.png',
+                show=not a.noshow,
+            )
+
+        elif a.target == 'bar':
+            dd = []
+            for code, data in (('A', data_A), ('B', data_B), ('C', data_C)):
+                dd.append(pd.DataFrame(
+                    data={'auc': data['auc'], 'setting': [code]*6, 'fold': list(range(1,7))},
+                ))
+            data = pd.concat(dd)
+
+            plt.figure(figsize=(4, 8), dpi=300)
+            sns.barplot(data=data, x='setting', y='auc',
+                        capsize=.1, errorbar=('ci', 95),
+                        edgecolor=['royalblue', 'forestgreen', 'crimson'],
+                        alpha=0.7,
+                        palette=['lightblue', 'lightgreen', 'lightcoral'],
+                        # errcolor='darkgrey',
+                        )
+            plt.ylabel('AUC')
+            plt.grid(axis='y')
+            plt.savefig('out/fig2/bar.png')
+            if not a.noshow:
+                plt.show()
+
+
+    def draw_curve_with_ci(self, xx, yy, label='{}', color=['blue', 'lightblue'], std_scale=2):
         l = []
-        mean_fpr = np.linspace(0, 1, 100)
+        mean_x = np.linspace(0, 1, 100)
         aucs = []
-        for (fpr, tpr) in zip(fprs, tprs):
-            l.append(np.interp(mean_fpr, fpr, tpr))
-            aucs.append(skmetrics.auc(fpr, tpr))
+        positive = yy[0][0] < yy[0][-1]
+        for (x, y) in zip(xx, yy):
+            l.append(np.interp(mean_x, x, y))
+            if positive:
+                aucs.append(skmetrics.auc(x, y))
+            else:
+                aucs.append(skmetrics.auc(y, x))
 
-        tprs = np.array(l)
-        mean_tpr = tprs.mean(axis=0)
-        std_tpr = tprs.std(axis=0)
+        yy = np.array(l)
+        mean_y = yy.mean(axis=0)
+        std_y = yy.std(axis=0)
 
-        plt.figure(figsize=(6, 5), dpi=300)
         mean_auc = np.mean(aucs)
         std_auc = np.std(aucs)
-        plt.plot(mean_fpr, mean_tpr, label=f'AUC:{mean_auc:0.3f} ± {std_auc:0.3f}', color=color[0])
+        auc_label = f'AUC:{mean_auc:0.3f} ± {std_auc:0.3f}'
+        plt.plot(mean_x, mean_y, label=label.format(auc_label), color=color[0])
 
         plt.fill_between(
-            mean_fpr,
-            mean_tpr - std_scale * std_tpr,
-            mean_tpr + std_scale * std_tpr,
-            color=color[1], alpha=0.5, label='± 1.0 s.d.')
+            mean_x,
+            mean_y - std_scale * std_y,
+            mean_y + std_scale * std_y,
+            color=color[1], alpha=0.2, label='± 1.0 s.d.')
+
+
+    # def draw_roc_with_ci(self, fprs, tprs, color=['blue', 'lightblue'], std_scale=2):
+    #     l = []
+    #     mean_fpr = np.linspace(0, 1, 100)
+    #     aucs = []
+    #     for (fpr, tpr) in zip(fprs, tprs):
+    #         l.append(np.interp(mean_fpr, fpr, tpr))
+    #         aucs.append(skmetrics.auc(fpr, tpr))
+
+    #     tprs = np.array(l)
+    #     mean_tpr = tprs.mean(axis=0)
+    #     std_tpr = tprs.std(axis=0)
+
+    #     mean_auc = np.mean(aucs)
+    #     std_auc = np.std(aucs)
+    #     plt.plot(mean_fpr, mean_tpr, label=f'AUC:{mean_auc:0.3f} ± {std_auc:0.3f}', color=color[0])
+
+    #     plt.fill_between(
+    #         mean_fpr,
+    #         mean_tpr - std_scale * std_tpr,
+    #         mean_tpr + std_scale * std_tpr,
+    #         color=color[1], alpha=0.2, label='± 1.0 s.d.')
+
+    def draw_roc_common(self, title, name=None, show=False):
         plt.plot([0, 1], [0, 1], linestyle='--', color='gray', linewidth=1)
         plt.xlim([0.0, 1.0])
         plt.ylim([0.0, 1.0])
-        plt.ylabel('Sensitivity')
+        plt.ylabel('Recall')
         plt.xlabel('1 - Specificity')
         plt.legend(loc='lower right')
-        plt.title(title.format('ROC curve'))
+        plt.title(title)
         if name:
-            plt.savefig(J('out/fig2_rocs', name))
+            plt.savefig(J('out/fig2', name))
+        if show:
+            plt.show()
+
+    def draw_pr_common(self, title, name=None, show=False):
+        plt.plot([0, 1], [1, 0], linestyle='--', color='gray', linewidth=1)
+        plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.0])
+        plt.xlabel('Recall')
+        plt.ylabel('Precision')
+        plt.legend(loc='lower left')
+        plt.title(title)
+        if name:
+            plt.savefig(J('out/fig2', name))
         if show:
             plt.show()
 
@@ -450,7 +587,7 @@ class CLI(BaseMLCLI):
             # ax.axhline(y=1.0, color='grey', linewidth=.5)
             # ax.grid(axis='y')
             sns.barplot(data=data, x='name', y=col_value, ax=ax,
-                        capsize=.1, errorbar='ci',
+                        capsize=.1, errorbar=('ci', 95),
                         # errcolor='darkgrey',
                         )
 
@@ -470,7 +607,7 @@ class CLI(BaseMLCLI):
         plot(ax, df_lr)
         ax.set(xlabel='Negative cases', ylabel=None)
 
-        plt.savefig('out/fig3_cam_score/bars.png')
+        plt.savefig('out/fig3/bars.png')
         plt.show()
 
 

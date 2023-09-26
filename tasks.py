@@ -71,19 +71,29 @@ def p(c):
     print(cmds)
 
 @invoke.task
-def plot_rocs(c):
+def plot_curves(c):
     cmds = [
         # 'python batch.py image-roc-by-folds --mode image --depth b0',
         # 'python batch.py gbm-roc-by-folds',
         # 'python batch.py image-roc-by-folds --mode integrated --depth b0',
 
-        'python batch.py gbm-roc-by-folds --noshow',
-        'python batch.py image-roc-by-folds --mode image --depth b0 --noshow',
-        'python batch.py image-roc-by-folds --mode image --depth b4 --noshow',
-        'python batch.py image-roc-by-folds --mode image --depth b8 --noshow',
-        'python batch.py image-roc-by-folds --mode integrated --depth b0 --noshow',
-        'python batch.py image-roc-by-folds --mode integrated --depth b4 --noshow',
-        'python batch.py image-roc-by-folds --mode integrated --depth b8 --noshow',
+        # ROC
+        'python batch.py gbm-curve-by-folds --curve roc --noshow',
+        'python batch.py image-curve-by-folds --curve roc --mode image --depth b0 --noshow',
+        'python batch.py image-curve-by-folds --curve roc --mode image --depth b4 --noshow',
+        'python batch.py image-curve-by-folds --curve roc --mode image --depth b8 --noshow',
+        'python batch.py image-curve-by-folds --curve roc --mode integrated --depth b0 --noshow',
+        'python batch.py image-curve-by-folds --curve roc --mode integrated --depth b4 --noshow',
+        'python batch.py image-curve-by-folds --curve roc --mode integrated --depth b8 --noshow',
+
+        # PR
+        'python batch.py gbm-curve-by-folds --curve pr --noshow',
+        'python batch.py image-curve-by-folds --curve pr --mode image --depth b0 --noshow',
+        'python batch.py image-curve-by-folds --curve pr --mode image --depth b4 --noshow',
+        'python batch.py image-curve-by-folds --curve pr --mode image --depth b8 --noshow',
+        'python batch.py image-curve-by-folds --curve pr --mode integrated --depth b0 --noshow',
+        'python batch.py image-curve-by-folds --curve pr --mode integrated --depth b4 --noshow',
+        'python batch.py image-curve-by-folds --curve pr --mode integrated --depth b8 --noshow',
     ]
     for cmd in cmds:
         print('CMD', cmd)
