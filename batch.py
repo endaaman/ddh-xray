@@ -552,7 +552,7 @@ class CLI(BaseMLCLI):
 
 
     def run_csor(self, a):
-        df_org =  pd.read_excel('data/cams/powers_aggr.xlsx', usecols=list(range(1,29)), index_col=0)
+        df_org =  pd.read_excel('data/cams/powers_aggr.xlsx', usecols=list(range(1, 31)), index_col=0)
         col_value = f'{a.target} CSoR'
 
         def select_col(col, name):
@@ -563,28 +563,51 @@ class CLI(BaseMLCLI):
             return d
 
         suffix = '' if a.target == 'mean' else ' max'
-        # bilateral Positive vs Negative
-        df_pos_bilateral = select_col('pos bilateral' + suffix, 'Positive')
-        df_neg_bilateral = select_col('neg bilateral' + suffix, 'Negative')
 
-        df_bilateral = pd.concat([df_neg_bilateral, df_pos_bilateral])
-        __, p = stats.mannwhitneyu(df_pos_bilateral[col_value], df_neg_bilateral[col_value], alternative='two-sided')
-        print('Bilateral / U test', p)
+        mean_recipe = [
+            {
+                'name': 'Bilateral',
+                'arm1': ['neg bilateral', 'Negative'],
+                'arm2': ['pos bilateral', 'Positive'],
+                'paired': False
+            }, {
+                'name': 'Positive',
+                'arm1': ['healthy', 'Healthy'],
+                'arm2': ['affected', 'Affected'],
+                'paired': True,
+            }, {
+                'name': 'Negative',
+                'arm1': ['neg left', 'Left'],
+                'arm2': ['neg right', 'Right'],
+                'paired': True,
+            },
+        ]
 
-        # affected vs healthy
-        df_affected = select_col('affected' + suffix, 'Affected')
-        df_healthy = select_col('healthy' + suffix, 'Healthy')
-        df_side = pd.concat([df_healthy, df_affected])
-        __, p  = stats.wilcoxon(df_affected[col_value], df_healthy[col_value], alternative='two-sided')
-        print('Affected vs Healthy / wilcoxon', p)
+        max_recipe = [
+            {
+                'name': 'Bilateral',
+                'arm1': ['neg bilateral max', 'Negative'],
+                'arm2': ['pos bilateral max', 'Positive'],
+                'paired': False
+            }, {
+                'name': 'Positive',
+                'arm1': ['healthy max', 'Healthy'],
+                'arm2': ['affected max', 'Affected'],
+                'paired': True,
+            }, {
+                'name': 'Negative',
+                'arm1': ['neg left max', 'Left'],
+                'arm2': ['neg right max', 'Right'],
+                'paired': True,
+            # }, {
+            #     'name': 'Total vs Healthy',
+            #     'arm1': ['total max', 'Total'],
+            #     'arm2': ['healthy max', 'Healthy'],
+            #     'paired': False,
+            }
+        ]
 
-
-        # negative: left vs right
-        df_neg_left = select_col('neg left' + suffix, 'Left')
-        df_neg_right = select_col('neg right' + suffix, 'Right')
-        df_lr = pd.concat([df_neg_left, df_neg_right])
-        __, p = stats.wilcoxon(df_neg_left[col_value], df_neg_right[col_value], alternative='two-sided')
-        print('Negative Left vs Right / wilcoxon', p)
+        recipe = mean_recipe if a.target == 'mean' else max_recipe
 
         def plot(ax, data):
             # ax.axhline(y=1.0, color='grey', linewidth=.5)
@@ -601,20 +624,26 @@ class CLI(BaseMLCLI):
             # sns.boxplot(data=data, x='name', y=col_value, ax=ax)
 
         sns.set_palette(sns.color_palette())
-        fig, axes = plt.subplots(1, 3, sharey=True, figsize=(6, 8), dpi=300)
+        fig, axes = plt.subplots(1, len(recipe), sharey=True, figsize=(6, len(recipe)*3), dpi=300)
         fig.suptitle(f'Comparison of {a.target} CAM Score on ROI')
 
-        ax = axes[0]
-        plot(ax, df_bilateral)
-        ax.set(xlabel='Bilateral')
-
-        ax = axes[1]
-        plot(ax, df_side)
-        ax.set(xlabel='Positive cases', ylabel=None)
-
-        ax = axes[2]
-        plot(ax, df_lr)
-        ax.set(xlabel='Negative cases', ylabel=None)
+        for i, r in enumerate(recipe):
+            print(r)
+            df1 = select_col(r['arm1'][0], r['arm1'][1])
+            df2 = select_col(r['arm2'][0], r['arm2'][1])
+            df_c = pd.concat([df1, df2])
+            print(r['name'], r['arm1'][1], 'vs', r['arm2'][1])
+            print(df1[col_value])
+            print(df2[col_value])
+            if r['paired']:
+                __, p  = stats.wilcoxon(df1[col_value], df2[col_value], alternative='two-sided')
+                print('\t wilcoxon', p)
+            else:
+                __, p = stats.mannwhitneyu(df1[col_value], df2[col_value], alternative='two-sided')
+                print('\t U test', p)
+            ax = axes[i]
+            plot(ax, df_c)
+            ax.set(xlabel=r['name'])
 
         plt.savefig(f'out/fig3/bars_{a.target}.png')
         plt.show()
