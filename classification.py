@@ -416,11 +416,16 @@ class CLI(BaseMLCLI):
             mask_arr = np.array(mask_img)
             # mask_arr = (mask_arr - np.min(mask_arr)) / (np.max(np.max(mask_arr), 1) - np.min(mask_arr))
 
+            # normalize
             mask_arr = mask_arr / np.max([np.sum(mask_arr), 1]) * (512*512)
             mask_on_right_roi = mask_arr[right_box[1]:right_box[3], right_box[0]:right_box[2]]
             mask_on_left_roi = mask_arr[left_box[1]:left_box[3], left_box[0]:left_box[2]]
             right_power = np.mean(mask_on_right_roi)
             left_power = np.mean(mask_on_left_roi)
+
+            total_max = np.max(mask_arr)
+            right_max_power = np.max(mask_on_right_roi)
+            left_max_power = np.max(mask_on_left_roi)
 
             data.append({
                 'id': id,
@@ -428,6 +433,9 @@ class CLI(BaseMLCLI):
                 'bilateral': left_power+right_power,
                 'right': right_power,
                 'left': left_power,
+                'right_max': right_max_power,
+                'left_max': left_max_power,
+                'total_max': total_max,
             })
 
             if a.render:
@@ -450,7 +458,7 @@ class CLI(BaseMLCLI):
                     font=font, color='black')
 
                 vis_img.save(f'out/cams/cams_with_roi/{id}_draw.png')
-                print(f'out/cams/cams_with_roi/{id}_draw.png')
+                # print(f'out/cams/cams_with_roi/{id}_draw.png')
 
             # plt.subplot(3,1,1)
             # plt.imshow(mask_on_left_roi)

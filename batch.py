@@ -34,11 +34,11 @@ sns.set_palette('tab10')
 # plt.rcParams['font.family'] = 'Arial'
 # plt.rcParams["font.size"] = 15 # 全体のフォントサイズが変更されます。
 
-plt.rcParams['xtick.direction'] = 'in' #x軸の目盛りの向き
+# plt.rcParams['xtick.direction'] = 'in' #x軸の目盛りの向き
+# plt.rcParams["xtick.minor.visible"] = True  #x軸補助目盛りの追加
+# plt.rcParams['xtick.bottom'] = True  #x軸の上部目盛り
 plt.rcParams['ytick.direction'] = 'in' #y軸の目盛りの向き
-plt.rcParams["xtick.minor.visible"] = True  #x軸補助目盛りの追加
 plt.rcParams["ytick.minor.visible"] = True  #y軸補助目盛りの追加
-plt.rcParams['xtick.bottom'] = True  #x軸の上部目盛り
 plt.rcParams['ytick.left'] = True  #y軸の右部目盛り
 
 json.encoder.FLOAT_REPR = lambda x: print(x) or format(x, '.8f')
@@ -377,7 +377,7 @@ class CLI(BaseMLCLI):
     class AllCurvesArgs(CommonArgs):
         curve: str = Field(..., regex=r'^roc|pr$')
         depth: str = 'b0'
-        target: str = Field('roc', regex=r'^roc|bar$')
+        graph: str = Field('roc', regex=r'^curves|bar|box$')
         noshow: bool = Field(False, cli=('--noshow', ))
 
     def run_all_curves(self, a):
@@ -406,7 +406,7 @@ class CLI(BaseMLCLI):
         data_B, __ii = self.train_gbm(df, a.seed)
 
 
-        if a.target == 'roc':
+        if a.graph == 'curves':
             plt.figure(figsize=(6, 5), dpi=300)
             recipe = (
                 ('A', data_A, ['royalblue', 'lightblue']),
@@ -430,25 +430,43 @@ class CLI(BaseMLCLI):
                 show=not a.noshow,
             )
 
-        elif a.target == 'bar':
+        elif a.graph in ['bar', 'box']:
             dd = []
             for code, data in (('A', data_A), ('B', data_B), ('C', data_C)):
-                dd.append(pd.DataFrame(
-                    data={'auc': data['auc'], 'setting': [code]*6, 'fold': list(range(1,7))},
-                ))
-            data = pd.concat(dd)
-
-            plt.figure(figsize=(4, 8), dpi=300)
-            sns.barplot(data=data, x='setting', y='auc',
-                        capsize=.1, errorbar=('ci', 95),
-                        edgecolor=['royalblue', 'forestgreen', 'crimson'],
-                        alpha=0.7,
-                        palette=['lightblue', 'lightgreen', 'lightcoral'],
-                        # errcolor='darkgrey',
-                        )
-            plt.ylabel('AUC')
+                if a.curve == 'roc':
+                    xx, yy = data['fpr'].values, data['tpr'].values
+                else:
+                    xx, yy = data['recall'].values, data['precision'].values
+                aucs = []
+                for (x, y) in zip(xx, yy):
+                    aucs.append(skmetrics.auc(x, y))
+                for i, auc in enumerate(aucs):
+                    dd.append({'auc': auc, 'setting': code, 'fold': i+1})
+            data = pd.DataFrame(dd)
+            plt.figure(figsize=(6, 4), dpi=300)
+            if a.graph == 'box':
+                sns.boxplot(data=data, x='setting', y='auc', hue='setting',
+                            width=.5,
+                            # capsize=.1, errorbar=('ci', 95),
+                            # alpha=0.7,
+                            # linecolor=['royalblue', 'forestgreen', 'crimson'],
+                            palette=['lightblue', 'lightgreen', 'lightcoral'],
+                            boxprops=dict(alpha=.7)
+                            # errcolor='darkgrey',
+                            )
+            elif a.graph == 'bar':
+                sns.barplot(data=data, x='setting', y='auc', hue='setting',
+                            width=.5,
+                            capsize=.1, errorbar=('ci', 95),
+                            # edgecolor=['royalblue', 'forestgreen', 'crimson'],
+                            palette=['lightblue', 'lightgreen', 'lightcoral'],
+                            alpha=0.7,
+                            )
+            else:
+                raise RuntimeError(f'Invalid graph: {a.graph}')
+            plt.ylabel(a.curve.upper() + ' AUC')
             plt.grid(axis='y')
-            plt.savefig('out/fig2/bar.png')
+            plt.savefig(f'out/fig2/all_{a.curve}_{a.graph}.png')
             if not a.noshow:
                 plt.show()
 
@@ -529,71 +547,62 @@ class CLI(BaseMLCLI):
         if show:
             plt.show()
 
+    class CsorArgs(CommonArgs):
+        target: str = Field(..., regex=r'^mean|max$')
 
-    def run_plot_powers(self, a):
-        df_org = pd.read_excel('data/cams/powers_aggr.xlsx', usecols=list(range(7))+list(range(8,17)), index_col=0)
-        print(df_org.columns)
 
-        col_value = 'CAM score'
+    def run_csor(self, a):
+        df_org =  pd.read_excel('data/cams/powers_aggr.xlsx', usecols=list(range(1,29)), index_col=0)
+        col_value = f'{a.target} CSoR'
 
+        def select_col(col, name):
+            d = df_org[[col]] \
+                .dropna() \
+                .rename(columns={col: col_value})
+            d['name'] = name
+            return d
+
+        suffix = '' if a.target == 'mean' else ' max'
         # bilateral Positive vs Negative
-        df_pos_bilateral = df_org[['pos bilateral']] \
-            .dropna() \
-            .rename(columns={'pos bilateral': col_value})
-        df_pos_bilateral['name'] = 'Positive'
-
-        df_neg_bilateral = df_org[['neg bilateral']] \
-            .dropna() \
-            .rename(columns={'neg bilateral': col_value})
-        df_neg_bilateral['name'] = 'Negative'
+        df_pos_bilateral = select_col('pos bilateral' + suffix, 'Positive')
+        df_neg_bilateral = select_col('neg bilateral' + suffix, 'Negative')
 
         df_bilateral = pd.concat([df_neg_bilateral, df_pos_bilateral])
-        u = stats.mannwhitneyu(df_pos_bilateral[col_value], df_neg_bilateral[col_value], alternative='two-sided')
-        print('Bilateral / U test', u)
+        __, p = stats.mannwhitneyu(df_pos_bilateral[col_value], df_neg_bilateral[col_value], alternative='two-sided')
+        print('Bilateral / U test', p)
 
         # affected vs healthy
-        df_affected = df_org[['affected']] \
-            .dropna() \
-            .rename(columns={'affected': col_value})
-        df_affected['name'] = 'Affected'
-
-        df_healthy = df_org[['healthy']] \
-            .dropna() \
-            .rename(columns={'healthy': col_value})
-        df_healthy['name'] = 'Healthy'
-
+        df_affected = select_col('affected' + suffix, 'Affected')
+        df_healthy = select_col('healthy' + suffix, 'Healthy')
         df_side = pd.concat([df_healthy, df_affected])
-        u = stats.wilcoxon(df_affected[col_value], df_healthy[col_value], alternative='two-sided')
-        print('Affected vs Healthy / wilcoxon', u)
+        __, p  = stats.wilcoxon(df_affected[col_value], df_healthy[col_value], alternative='two-sided')
+        print('Affected vs Healthy / wilcoxon', p)
 
 
         # negative: left vs right
-        df_neg_left = df_org[['neg left']] \
-            .dropna() \
-            .rename(columns={'neg left': col_value})
-        df_neg_left['name'] = 'Left'
-
-        df_neg_right = df_org[['neg right']] \
-            .dropna() \
-            .rename(columns={'neg right': col_value})
-        df_neg_right['name'] = 'Right'
-
+        df_neg_left = select_col('neg left' + suffix, 'Left')
+        df_neg_right = select_col('neg right' + suffix, 'Right')
         df_lr = pd.concat([df_neg_left, df_neg_right])
-        u = stats.wilcoxon(df_neg_left[col_value], df_neg_right[col_value], alternative='two-sided')
-        print('Negative Left vs Right / wilcoxon', u)
-
+        __, p = stats.wilcoxon(df_neg_left[col_value], df_neg_right[col_value], alternative='two-sided')
+        print('Negative Left vs Right / wilcoxon', p)
 
         def plot(ax, data):
             # ax.axhline(y=1.0, color='grey', linewidth=.5)
-            # ax.grid(axis='y')
-            sns.barplot(data=data, x='name', y=col_value, ax=ax,
-                        capsize=.1, errorbar=('ci', 95),
-                        # errcolor='darkgrey',
+            ax.grid(axis='y')
+            sns.barplot(data=data, x='name', y=col_value, hue='name', ax=ax,
+                        # edgecolor=['tab:blue', 'tab:orange'],
+                        palette=['tab:blue', 'tab:orange'],
+                        alpha=0.7,
+                        capsize=.4,
+                        errorbar=('ci', 95),
+                        err_kws={'linewidth': 1},
                         )
+
+            # sns.boxplot(data=data, x='name', y=col_value, ax=ax)
 
         sns.set_palette(sns.color_palette())
         fig, axes = plt.subplots(1, 3, sharey=True, figsize=(6, 8), dpi=300)
-        fig.suptitle('Comparison of CAM scores')
+        fig.suptitle(f'Comparison of {a.target} CAM Score on ROI')
 
         ax = axes[0]
         plot(ax, df_bilateral)
@@ -607,7 +616,7 @@ class CLI(BaseMLCLI):
         plot(ax, df_lr)
         ax.set(xlabel='Negative cases', ylabel=None)
 
-        plt.savefig('out/fig3/bars.png')
+        plt.savefig(f'out/fig3/bars_{a.target}.png')
         plt.show()
 
 
