@@ -471,6 +471,8 @@ class CLI(BaseMLCLI):
         data = pd.DataFrame(data)
         data.to_excel('out/cams/powers.xlsx')
 
+
+
 if __name__ == '__main__':
     cli = CLI()
     cli.run()

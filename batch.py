@@ -10,7 +10,9 @@ import pandas as pd
 import seaborn as sns
 import matplotlib
 from matplotlib import pyplot as plt
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import matplotlib.cm as cm
+import mpl_toolkits.mplot3d as mp3d
 from sklearn import metrics as skmetrics
 from scipy import stats
 import numpy as np
@@ -19,7 +21,9 @@ import lightgbm as lgb
 
 from endaaman.ml import BaseMLCLI, roc_auc_ci
 
+from datasets import read_label_as_df
 from common import col_target, cols_feature, cols_measure, load_data
+
 
 # matplotlib.use('TkAgg')
 
@@ -647,6 +651,98 @@ class CLI(BaseMLCLI):
 
         plt.savefig(f'out/fig3/bars_{a.target}.png')
         plt.show()
+
+    def run_surface(self, a):
+        id = 32
+        side = 'left'
+        roi = read_label_as_df(f'data/labels/{id:04}.txt')
+        target_label = [1,2,3] if side == 'right' else [4,5,6]
+        brois = roi[roi['label'].isin(target_label)]
+        hroi = np.array([
+            brois['x0'].min(),
+            brois['y0'].min(),
+            brois['x1'].max(),
+            brois['y1'].max(),
+        ]).round().astype(int)
+
+
+        mask = Image.open(f'data/cams/crop/{id:04}_mask_pos.png')
+        mask = np.array(mask) / 255
+
+        mask = mask / mask.sum() * mask.shape[0] * mask.shape[1]
+
+        fig = plt.figure(figsize=(12, 8))
+
+        ax = fig.add_subplot(121)
+        im = ax.imshow(mask, cmap='jet')
+
+        ax = fig.add_subplot(122, projection='3d')
+        y = np.arange(mask.shape[0])
+        x = np.arange(mask.shape[1])
+        X, Y = np.meshgrid(x, y)
+        surf = ax.plot_surface(Y, X, mask, cmap='jet', linewidth=0.01)
+        # surf = ax.plot_trisurf(Y, X, mask, cmap='jet')
+
+        # mean_surf = ax.plot_surface(Y, X, np.ones(mask.shape), cstride=2, rstride=1, cmap=cm.Blues, linewidth=0, antialiased=False, alpha=0.5)
+
+        # surf1 = ax.plot_surface(X, Y, mask,
+        #                         cstride=2, rstride=1,
+        #                         cmap=cm.Oranges, linewidth=0, antialiased=False, alpha=0.3)
+
+        # surf2 = ax.plot_surface(X, Y, np.ones(mask.shape),
+        #                         cstride=2, rstride=1,
+        #                         cmap=cm.Blues, linewidth=0, antialiased=False, alpha=0.3)
+
+        # ax.zaxis.set_major_locator(LinearLocator(10))
+        # ax.zaxis.set_major_formatter(FormatStrFormatter('%.02f'))
+        # fig.colorbar(surf, ax=ax, aspect=5)
+        plt.show()
+
+
+
+    def run_s(self, a):
+        mask = Image.open(f'data/cams/crop/0032_mask_pos.png')
+        mask.resize((mask.width//3, mask.height//3))
+        data = np.array(mask) / 255
+
+        x, y = np.meshgrid(np.arange(data.shape[1] + 1), np.arange(data.shape[0] + 1))
+        x = x.flatten()
+        y = y.flatten()
+        z = np.zeros_like(x)
+
+        # ポリゴンの頂点リストを作成
+        vertices = list(zip(x, y, z))
+
+        polygons = []
+        for i in range(data.shape[0]):
+            for j in range(data.shape[1]):
+                # 各セルの4つの頂点のインデックスを計算
+                v0 = i * (data.shape[1] + 1) + j
+                v1 = v0 + 1
+                v2 = v0 + data.shape[1] + 1
+                v3 = v1 + data.shape[1] + 1
+
+                # 頂点を指定してポリゴンを作成
+                polygon = [vertices[v0], vertices[v1], vertices[v2], vertices[v3]]
+
+                # カラーマップから色を取得し、ポリゴンの色を設定
+                color = plt.cm.viridis(data[i, j])  # カラーマップを選択
+                poly = Poly3DCollection([polygon], facecolors=[color], edgecolors='k')
+                polygons.append(poly)
+
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+
+        for poly in polygons:
+            ax.add_collection3d(poly)
+
+        ax.set_xlabel('X')
+        ax.set_ylabel('Y')
+        ax.set_zlabel('Z')
+
+        plt.show()
+
+
 
 
 
