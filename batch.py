@@ -10,6 +10,7 @@ import pandas as pd
 import seaborn as sns
 import matplotlib
 from matplotlib import pyplot as plt
+from matplotlib.ticker import MultipleLocator, FormatStrFormatter
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import matplotlib.cm as cm
 import mpl_toolkits.mplot3d as mp3d
@@ -297,6 +298,7 @@ class CLI(BaseMLCLI):
 
     class GbmCurveByFoldsArgs(CommonArgs):
         curve: str = Field(..., regex=r'^roc|pr$')
+        depth: str = Field('', regex=r'^b0|b4|b8$')
         noshow: bool = Field(False, cli=('--noshow', ))
 
     def run_gbm_curve_by_folds(self, a):
@@ -320,17 +322,16 @@ class CLI(BaseMLCLI):
             std_scale=1,
             color=['forestgreen', 'lightgreen'],
         )
-        draw(
-            title='Setting: B\nClinical measurements only',
-            name=f'{a.curve}_b.png',
-            show=not a.noshow
-        )
+        draw(title='Setting: B\nClinical measurements only')
+        plt.savefig(f'out/fig2/{a.depth}/{a.curve}_b.png')
+        if not a.noshow:
+            plt.show()
 
 
     class ImageCurveByFoldsArgs(CommonArgs):
         curve: str = Field(..., regex=r'^roc|pr$')
         mode: str = 'image'
-        depth: str = 'b0'
+        depth: str = Field(..., regex=r'^b0|b4|b8$')
         noshow: bool = Field(False, cli=('--noshow', ))
 
     def run_image_curve_by_folds(self, a):
@@ -361,11 +362,11 @@ class CLI(BaseMLCLI):
         # print(np.mean(data['auc']))
 
         if a.mode == 'image':
-            name = f'{a.curve}_a_{a.depth}.png'
+            filename = f'{a.curve}_a.png'
             title = f'Setting: A\nXp image only'
             color=['royalblue', 'lightblue']
         else:
-            name = f'{a.curve}_c_{a.depth}.png'
+            filename = f'{a.curve}_c.png'
             title = f'Setting: C\nXp image + Clinical measurements'
             color=['crimson', 'lightcoral']
 
@@ -382,11 +383,11 @@ class CLI(BaseMLCLI):
             std_scale=1,
             color=color,
         )
-        draw(
-            title=title,
-            name=name,
-            show=not a.noshow
-        )
+        draw(title=title)
+
+        plt.savefig(J(f'out/fig2/{a.depth}', filename))
+        if not a.noshow:
+            plt.show()
 
     def load_ABC(self, depth, seed):
         base = 'data/result/classification_effnet_final'
@@ -423,7 +424,7 @@ class CLI(BaseMLCLI):
 
     class CompareCurveArgs(CommonArgs):
         curve: str = Field(..., regex=r'^roc|pr$')
-        depth: str = 'b0'
+        depth: str = Field(..., regex=r'^b0|b4|b8$')
         noshow: bool = Field(False, cli=('--noshow', ))
 
     def run_compare_curve(self, a):
@@ -454,11 +455,12 @@ class CLI(BaseMLCLI):
 
     class CompareAucArgs(CommonArgs):
         graph: str = Field(..., regex=r'^bar|box$')
-        target: str = Field(..., regex=r'^roc|pr$')
-        depth: str = 'b0'
+        curve: str = Field(..., regex=r'^roc|pr$')
+        depth: str = Field(..., regex=r'^b0|b4|b8$')
         noshow: bool = Field(False, cli=('--noshow', ))
 
     def run_compare_auc(self, a):
+        data_A, data_B, data_C = self.load_ABC(a.depth, a.seed)
         dd = []
         for code, data in (('A', data_A), ('B', data_B), ('C', data_C)):
             if a.curve == 'roc':
@@ -495,7 +497,10 @@ class CLI(BaseMLCLI):
                 palette=['grey'],
                 # marker='X',
                 size=5,
-                ax=ax)
+                ax=ax,
+            )
+            # ax.yaxis.set_major_locator(MultipleLocator(0.01))
+            # ax.set_ylim(0.6, 0.9)
         elif a.graph == 'bar':
             sns.barplot(
                 data=data, x='setting', y='auc', hue='setting',
@@ -508,29 +513,81 @@ class CLI(BaseMLCLI):
                 alpha=0.8,
                 ax=ax,
             )
-
         else:
             raise RuntimeError(f'Invalid graph: {a.graph}')
         plt.ylabel(a.curve.upper() + ' AUC')
         # plt.grid(axis='y')
         plt.subplots_adjust(bottom=0.15, left=0.15)
-        plt.savefig(f'out/fig2/all_{a.curve}_{a.graph}.png')
+        plt.savefig(f'out/fig2/{a.depth}/all_{a.graph}_{a.curve}.png')
         if not a.noshow:
             plt.show()
 
     class CompareMetricArgs(CommonArgs):
         metric: str = Field(..., regex=r'^acc|f1$')
-        depth: str = 'b0'
+        graph: str = Field(..., regex=r'^bar|box$')
+        depth: str = Field(..., regex=r'^b0|b4|b8$')
         noshow: bool = Field(False, cli=('--noshow', ))
 
     def run_compare_metric(self, a):
         data_A, data_B, data_C = self.load_ABC(a.depth, a.seed)
+        dd = []
         for data, setting in [(data_A, 'A'), (data_B, 'B'), (data_C, 'C'), ]:
-            print(setting)
             for fold, row in data.iterrows():
                 tpr, fpr, acc, f1 = row['tpr'], row['fpr'], row['acc'], row['f1']
+                # i = np.argmax(f1)
                 i = np.argmax(tpr - fpr)
-                print(fold, 'acc', acc[i], 'f1', f1[i])
+                # print(fold, 'acc', np.max(acc), 'f1', np.max(f1))
+
+                dd.append({'acc': np.max(acc), 'f1': np.max(f1), 'setting': setting, 'fold': i+1})
+
+        data = pd.DataFrame(dd)
+        fig, ax = plt.subplots(figsize=(6, 4), dpi=300)
+        if a.graph == 'box':
+            sns.boxplot(
+                data=data, x='setting', y=a.metric, hue='setting',
+                width=.5,
+                # capsize=.1, errorbar=('ci', 95),
+                # alpha=0.7,
+                # linecolor=['royalblue', 'forestgreen', 'crimson'],
+                palette=['lightblue', 'lightgreen', 'lightcoral'],
+                boxprops=dict(alpha=.7),
+                # errcolor='darkgrey',
+                showfliers=False,
+                ax=ax,
+            )
+
+            # sns.stripplot(
+            sns.swarmplot(
+                data=data, x='setting', y=a.metric, hue='setting',
+                # palette=['lightblue', 'lightgreen', 'lightcoral'],
+                alpha=0.7,
+                palette=['grey'],
+                # marker='X',
+                size=5,
+                ax=ax,
+            )
+            # ax.yaxis.set_major_locator(MultipleLocator(0.05))
+            # ax.set_ylim(0.6, 0.9)
+        elif a.graph == 'bar':
+            sns.barplot(
+                data=data, x='setting', y=a.metric, hue='setting',
+                width=.5,
+                # capsize=.1,
+                errorbar=('ci', 95),
+                err_kws={"color": "gray", "linewidth": 2.0, "alpha": 0.7},
+                # edgecolor=['royalblue', 'forestgreen', 'crimson'],
+                palette=['lightblue', 'lightgreen', 'lightcoral'],
+                alpha=0.8,
+                ax=ax,
+            )
+        else:
+            raise RuntimeError(f'Invalid graph: {a.graph}')
+        # plt.grid(axis='y')
+        plt.ylabel({'acc': 'Accuracy', 'f1': 'F1 score'}[a.metric])
+        plt.subplots_adjust(bottom=0.15, left=0.15)
+        plt.savefig(f'out/fig2/{a.depth}/all_{a.graph}_{a.metric}.png')
+        if not a.noshow:
+            plt.show()
 
 
         # self.data_A = data_A
@@ -567,7 +624,7 @@ class CLI(BaseMLCLI):
                 color=color[1], alpha=0.2, label='± 1.0 s.d.')
 
 
-    def draw_roc_common(self, title, name=None, show=False):
+    def draw_roc_common(self, title):
         plt.plot([0, 1], [0, 1], linestyle='--', color='gray', linewidth=1)
         plt.xlim([0.0, 1.0])
         plt.ylim([0.0, 1.0])
@@ -576,12 +633,8 @@ class CLI(BaseMLCLI):
         plt.legend(loc='lower right')
         plt.title(title)
         plt.subplots_adjust(bottom=0.15, left=0.15, top=0.85)
-        if name:
-            plt.savefig(J('out/fig2', name))
-        if show:
-            plt.show()
 
-    def draw_pr_common(self, title, name=None, show=False):
+    def draw_pr_common(self, title):
         plt.plot([0, 1], [1, 0], linestyle='--', color='gray', linewidth=1)
         plt.xlim([0.0, 1.0])
         plt.ylim([0.0, 1.0])
@@ -591,10 +644,6 @@ class CLI(BaseMLCLI):
         plt.subplots_adjust(bottom=0.15, left=0.15)
         plt.title(title)
         plt.subplots_adjust(bottom=0.15, left=0.15, top=0.85)
-        if name:
-            plt.savefig(J('out/fig2', name))
-        if show:
-            plt.show()
 
     class CsorArgs(CommonArgs):
         target: str = Field(..., regex=r'^mean|max$')

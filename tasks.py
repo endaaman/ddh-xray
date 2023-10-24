@@ -72,29 +72,30 @@ def p(c):
 
 @invoke.task
 def plot_curves(c):
-    cmds = [
-        # 'python batch.py image-roc-by-folds --mode image --depth b0',
-        # 'python batch.py gbm-roc-by-folds',
-        # 'python batch.py image-roc-by-folds --mode integrated --depth b0',
+    for depth in ['b0', 'b4', 'b8']:
+        cmds = [
+            # metric
+            f'python batch.py compare-metric --metric acc --graph box --depth {depth} --noshow',
+            f'python batch.py compare-metric --metric acc --graph bar --depth {depth} --noshow',
+            f'python batch.py compare-metric --metric f1 --graph box --depth {depth} --noshow',
+            f'python batch.py compare-metric --metric f1 --graph bar --depth {depth} --noshow',
 
-        # ROC
-        'python batch.py gbm-curve-by-folds --curve roc --noshow',
-        'python batch.py image-curve-by-folds --curve roc --mode image --depth b0 --noshow',
-        'python batch.py image-curve-by-folds --curve roc --mode image --depth b4 --noshow',
-        'python batch.py image-curve-by-folds --curve roc --mode image --depth b8 --noshow',
-        'python batch.py image-curve-by-folds --curve roc --mode integrated --depth b0 --noshow',
-        'python batch.py image-curve-by-folds --curve roc --mode integrated --depth b4 --noshow',
-        'python batch.py image-curve-by-folds --curve roc --mode integrated --depth b8 --noshow',
+            # auc
+            f'python batch.py compare-auc --curve roc --graph box --depth {depth} --noshow',
+            f'python batch.py compare-auc --curve roc --graph bar --depth {depth} --noshow',
+            f'python batch.py compare-auc --curve pr --graph bar --depth {depth} --noshow',
+            f'python batch.py compare-auc --curve pr --graph box --depth {depth} --noshow',
 
-        # PR
-        'python batch.py gbm-curve-by-folds --curve pr --noshow',
-        'python batch.py image-curve-by-folds --curve pr --mode image --depth b0 --noshow',
-        'python batch.py image-curve-by-folds --curve pr --mode image --depth b4 --noshow',
-        'python batch.py image-curve-by-folds --curve pr --mode image --depth b8 --noshow',
-        'python batch.py image-curve-by-folds --curve pr --mode integrated --depth b0 --noshow',
-        'python batch.py image-curve-by-folds --curve pr --mode integrated --depth b4 --noshow',
-        'python batch.py image-curve-by-folds --curve pr --mode integrated --depth b8 --noshow',
-    ]
-    for cmd in cmds:
-        print('CMD', cmd)
-        c.run(cmd)
+            # ROC
+            f'python batch.py image-curve-by-folds --curve roc --mode image --depth {depth} --noshow',
+            f'python batch.py image-curve-by-folds --curve roc --mode integrated --depth {depth} --noshow',
+            f'python batch.py gbm-curve-by-folds --curve roc --depth {depth} --noshow',
+
+            # PR
+            f'python batch.py image-curve-by-folds --curve pr --mode image --depth {depth} --noshow',
+            f'python batch.py image-curve-by-folds --curve pr --mode integrated --depth {depth} --noshow',
+            f'python batch.py gbm-curve-by-folds --curve pr --depth {depth} --noshow',
+        ]
+        for cmd in cmds:
+            print('CMD', cmd)
+            c.run(cmd)
