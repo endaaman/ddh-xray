@@ -44,6 +44,7 @@ sns.set_palette('tab10')
 plt.rcParams['ytick.direction'] = 'in' #y軸の目盛りの向き
 plt.rcParams["ytick.minor.visible"] = True  #y軸補助目盛りの追加
 plt.rcParams['ytick.left'] = True  #y軸の右部目盛り
+plt.rcParams['font.size'] = 16
 
 json.encoder.FLOAT_REPR = lambda x: print(x) or format(x, '.8f')
 J = os.path.join
@@ -156,7 +157,7 @@ class CLI(BaseMLCLI):
                 pred = P['val_preds'].flatten()
                 gt = P['val_gts'].flatten()
 
-                fpr, tpr, __thresholds = skmetrics.roc_curve(gt, pred)
+                fpr, tpr, thresholds = skmetrics.roc_curve(gt, pred)
                 auc = skmetrics.auc(fpr, tpr)
                 result[mode].append(auc)
                 preds.append(pred)
@@ -273,11 +274,15 @@ class CLI(BaseMLCLI):
 
             pred_valid = model.predict(x_valid, num_iteration=model.best_iteration)
 
-            fpr, tpr, __ = skmetrics.roc_curve(y_valid, pred_valid)
+            fpr, tpr, thresholds = skmetrics.roc_curve(y_valid, pred_valid)
+            acc = [skmetrics.accuracy_score(y_valid, pred_valid>t) for t in thresholds]
+            f1 = 2 * (acc * tpr) / (acc + tpr)
             precision, recall, __ = skmetrics.precision_recall_curve(y_valid, pred_valid)
             data.append({
                 'fpr': fpr,
                 'tpr': tpr,
+                'acc': acc,
+                'f1': f1,
                 'precision': precision,
                 'recall': recall,
             })
@@ -337,13 +342,17 @@ class CLI(BaseMLCLI):
         for fold in range(1,7):
             pred_path = f'{base}/{a.mode}/tf_efficientnet_{a.depth}_fold{fold}/predictions.pt'
             pred = torch.load(pred_path, map_location=torch.device('cpu'))
-            gts = pred['val_gts'].flatten()
-            preds = pred['val_preds'].flatten()
-            fpr, tpr, thresholds = skmetrics.roc_curve(gts.numpy(), preds.numpy())
-            precision, recall, thresholds = skmetrics.precision_recall_curve(gts.numpy(), preds.numpy())
+            gts = pred['val_gts'].flatten().numpy()
+            preds = pred['val_preds'].flatten().numpy()
+            fpr, tpr, thresholds = skmetrics.roc_curve(gts, preds)
+            acc = [skmetrics.accuracy_score(gts, preds>t) for t in thresholds]
+            f1 = 2 * (acc * tpr) / (acc + tpr)
+            precision, recall, thresholds = skmetrics.precision_recall_curve(gts, preds)
             data.append({
                 'fpr': fpr,
                 'tpr': tpr,
+                'acc': acc,
+                'f1': f1,
                 'recall': recall,
                 'precision': precision,
             })
@@ -367,6 +376,7 @@ class CLI(BaseMLCLI):
         else:
             xx, yy = data['precision'], data['recall']
             draw = self.draw_pr_common
+
         self.draw_curve_with_ci(
             xx, yy,
             std_scale=1,
@@ -378,104 +388,157 @@ class CLI(BaseMLCLI):
             show=not a.noshow
         )
 
-    class AllCurvesArgs(CommonArgs):
-        curve: str = Field(..., regex=r'^roc|pr$')
-        depth: str = 'b0'
-        graph: str = Field('roc', regex=r'^curves|bar|box$')
-        noshow: bool = Field(False, cli=('--noshow', ))
-
-    def run_all_curves(self, a):
+    def load_ABC(self, depth, seed):
         base = 'data/result/classification_effnet_final'
         data_A = []
         data_C = []
         for fold in range(1,7):
             for mode, data in [('image', data_A), ('integrated', data_C)]:
-                pred_path = f'{base}/{mode}/tf_efficientnet_{a.depth}_fold{fold}/predictions.pt'
+                pred_path = f'{base}/{mode}/tf_efficientnet_{depth}_fold{fold}/predictions.pt'
                 pred = torch.load(pred_path, map_location=torch.device('cpu'))
-                gts = pred['val_gts'].flatten()
-                preds = pred['val_preds'].flatten()
-                fpr, tpr, __ = skmetrics.roc_curve(gts.numpy(), preds.numpy())
-                precision, recall, __ = skmetrics.precision_recall_curve(gts.numpy(), preds.numpy())
+                gts = pred['val_gts'].flatten().numpy()
+                preds = pred['val_preds'].flatten().numpy()
+                fpr, tpr, thresholds = skmetrics.roc_curve(gts, preds)
+                acc = [skmetrics.accuracy_score(gts, preds>t) for t in thresholds]
+                f1 = 2 * (acc * tpr) / (acc + tpr)
+                precision, recall, __ = skmetrics.precision_recall_curve(gts, preds)
                 data.append({
                     'fpr': fpr,
                     'tpr': tpr,
+                    'acc': acc,
+                    'f1': f1,
+                    'thresholds': thresholds,
                     'recall': recall,
                     'precision': precision,
                 })
         data_A = pd.DataFrame(data_A)
         data_C = pd.DataFrame(data_C)
 
-        dfs = load_data(0, True, a.seed)
+        dfs = load_data(0, True, seed)
         df = dfs['all']
-        data_B, __ii = self.train_gbm(df, a.seed)
+        data_B, __ii = self.train_gbm(df, seed)
+
+        return data_A, data_B, data_C
 
 
-        if a.graph == 'curves':
-            plt.figure(figsize=(6, 5), dpi=300)
-            recipe = (
-                ('A', data_A, ['royalblue', 'lightblue']),
-                ('B', data_B, ['forestgreen', 'lightgreen']),
-                ('C', data_C, ['crimson', 'lightcoral']),
-            )
-            for (code, data, c) in recipe:
-                if a.curve == 'roc':
-                    xx, yy = data['fpr'], data['tpr']
-                else:
-                    xx, yy = data['precision'], data['recall']
-                self.draw_curve_with_ci(
-                    xx, yy, label='Setting '+code+' ({})',
-                    std_scale=1,
-                    color=c,
-                )
-            draw = self.draw_roc_common if a.curve == 'roc' else self.draw_pr_common
-            draw(
-                title=a.curve.upper() + ' curve',
-                name=f'all_{a.curve}.png',
-                show=not a.noshow,
-            )
+    class CompareCurveArgs(CommonArgs):
+        curve: str = Field(..., regex=r'^roc|pr$')
+        depth: str = 'b0'
+        noshow: bool = Field(False, cli=('--noshow', ))
 
-        elif a.graph in ['bar', 'box']:
-            dd = []
-            for code, data in (('A', data_A), ('B', data_B), ('C', data_C)):
-                if a.curve == 'roc':
-                    xx, yy = data['fpr'].values, data['tpr'].values
-                else:
-                    xx, yy = data['recall'].values, data['precision'].values
-                aucs = []
-                for (x, y) in zip(xx, yy):
-                    aucs.append(skmetrics.auc(x, y))
-                for i, auc in enumerate(aucs):
-                    dd.append({'auc': auc, 'setting': code, 'fold': i+1})
-            data = pd.DataFrame(dd)
-            plt.figure(figsize=(6, 4), dpi=300)
-            if a.graph == 'box':
-                sns.boxplot(data=data, x='setting', y='auc', hue='setting',
-                            width=.5,
-                            # capsize=.1, errorbar=('ci', 95),
-                            # alpha=0.7,
-                            # linecolor=['royalblue', 'forestgreen', 'crimson'],
-                            palette=['lightblue', 'lightgreen', 'lightcoral'],
-                            boxprops=dict(alpha=.7)
-                            # errcolor='darkgrey',
-                            )
-            elif a.graph == 'bar':
-                sns.barplot(data=data, x='setting', y='auc', hue='setting',
-                            width=.5,
-                            capsize=.1, errorbar=('ci', 95),
-                            # edgecolor=['royalblue', 'forestgreen', 'crimson'],
-                            palette=['lightblue', 'lightgreen', 'lightcoral'],
-                            alpha=0.7,
-                            )
+    def run_compare_curve(self, a):
+        data_A, data_B, data_C = self.load_ABC(a.depth, a.seed)
+
+        plt.figure(figsize=(6, 5), dpi=300)
+        recipe = (
+            ('A', data_A, ['royalblue', 'lightblue']),
+            ('B', data_B, ['forestgreen', 'lightgreen']),
+            ('C', data_C, ['crimson', 'lightcoral']),
+        )
+        for (code, data, c) in recipe:
+            if a.curve == 'roc':
+                xx, yy = data['fpr'], data['tpr']
             else:
-                raise RuntimeError(f'Invalid graph: {a.graph}')
-            plt.ylabel(a.curve.upper() + ' AUC')
-            plt.grid(axis='y')
-            plt.savefig(f'out/fig2/all_{a.curve}_{a.graph}.png')
-            if not a.noshow:
-                plt.show()
+                xx, yy = data['precision'], data['recall']
+            self.draw_curve_with_ci(
+                xx, yy, label='Setting '+code+' ({})',
+                std_scale=1,
+                color=c,
+            )
+        draw = self.draw_roc_common if a.curve == 'roc' else self.draw_pr_common
+        draw(
+            title=a.curve.upper() + ' curve',
+            name=f'all_{a.curve}.png',
+            show=not a.noshow,
+        )
+
+    class CompareAucArgs(CommonArgs):
+        graph: str = Field(..., regex=r'^bar|box$')
+        target: str = Field(..., regex=r'^roc|pr$')
+        depth: str = 'b0'
+        noshow: bool = Field(False, cli=('--noshow', ))
+
+    def run_compare_auc(self, a):
+        dd = []
+        for code, data in (('A', data_A), ('B', data_B), ('C', data_C)):
+            if a.curve == 'roc':
+                xx, yy = data['fpr'].values, data['tpr'].values
+            else:
+                xx, yy = data['recall'].values, data['precision'].values
+            aucs = []
+            for (x, y) in zip(xx, yy):
+                aucs.append(skmetrics.auc(x, y))
+            for i, auc in enumerate(aucs):
+                dd.append({'auc': auc, 'setting': code, 'fold': i+1})
+        data = pd.DataFrame(dd)
+        # plt.figure(figsize=(6, 4), dpi=300)
+        fig, ax = plt.subplots(figsize=(6, 4), dpi=300)
+        if a.graph == 'box':
+            sns.boxplot(
+                data=data, x='setting', y='auc', hue='setting',
+                width=.5,
+                # capsize=.1, errorbar=('ci', 95),
+                # alpha=0.7,
+                # linecolor=['royalblue', 'forestgreen', 'crimson'],
+                palette=['lightblue', 'lightgreen', 'lightcoral'],
+                boxprops=dict(alpha=.7),
+                # errcolor='darkgrey',
+                showfliers=False,
+                ax=ax,
+            )
+
+            # sns.stripplot(
+            sns.swarmplot(
+                data=data, x='setting', y='auc', hue='setting',
+                # palette=['lightblue', 'lightgreen', 'lightcoral'],
+                alpha=0.7,
+                palette=['grey'],
+                # marker='X',
+                size=5,
+                ax=ax)
+        elif a.graph == 'bar':
+            sns.barplot(
+                data=data, x='setting', y='auc', hue='setting',
+                width=.5,
+                # capsize=.1,
+                errorbar=('ci', 95),
+                err_kws={"color": "gray", "linewidth": 2.0, "alpha": 0.7},
+                # edgecolor=['royalblue', 'forestgreen', 'crimson'],
+                palette=['lightblue', 'lightgreen', 'lightcoral'],
+                alpha=0.8,
+                ax=ax,
+            )
+
+        else:
+            raise RuntimeError(f'Invalid graph: {a.graph}')
+        plt.ylabel(a.curve.upper() + ' AUC')
+        # plt.grid(axis='y')
+        plt.subplots_adjust(bottom=0.15, left=0.15)
+        plt.savefig(f'out/fig2/all_{a.curve}_{a.graph}.png')
+        if not a.noshow:
+            plt.show()
+
+    class CompareMetricArgs(CommonArgs):
+        metric: str = Field(..., regex=r'^acc|f1$')
+        depth: str = 'b0'
+        noshow: bool = Field(False, cli=('--noshow', ))
+
+    def run_compare_metric(self, a):
+        data_A, data_B, data_C = self.load_ABC(a.depth, a.seed)
+        for data, setting in [(data_A, 'A'), (data_B, 'B'), (data_C, 'C'), ]:
+            print(setting)
+            for fold, row in data.iterrows():
+                tpr, fpr, acc, f1 = row['tpr'], row['fpr'], row['acc'], row['f1']
+                i = np.argmax(tpr - fpr)
+                print(fold, 'acc', acc[i], 'f1', f1[i])
 
 
-    def draw_curve_with_ci(self, xx, yy, label='{}', color=['blue', 'lightblue'], std_scale=2):
+        # self.data_A = data_A
+        # self.data_B = data_B
+        # self.data_C = data_C
+
+
+    def draw_curve_with_ci(self, xx, yy, fill=True, label='{}', color=['blue', 'lightblue'], std_scale=2):
         l = []
         mean_x = np.linspace(0, 1, 100)
         aucs = []
@@ -496,34 +559,13 @@ class CLI(BaseMLCLI):
         auc_label = f'AUC:{mean_auc:0.3f} ± {std_auc:0.3f}'
         plt.plot(mean_x, mean_y, label=label.format(auc_label), color=color[0])
 
-        plt.fill_between(
-            mean_x,
-            mean_y - std_scale * std_y,
-            mean_y + std_scale * std_y,
-            color=color[1], alpha=0.2, label='± 1.0 s.d.')
+        if fill:
+            plt.fill_between(
+                mean_x,
+                mean_y - std_scale * std_y,
+                mean_y + std_scale * std_y,
+                color=color[1], alpha=0.2, label='± 1.0 s.d.')
 
-
-    # def draw_roc_with_ci(self, fprs, tprs, color=['blue', 'lightblue'], std_scale=2):
-    #     l = []
-    #     mean_fpr = np.linspace(0, 1, 100)
-    #     aucs = []
-    #     for (fpr, tpr) in zip(fprs, tprs):
-    #         l.append(np.interp(mean_fpr, fpr, tpr))
-    #         aucs.append(skmetrics.auc(fpr, tpr))
-
-    #     tprs = np.array(l)
-    #     mean_tpr = tprs.mean(axis=0)
-    #     std_tpr = tprs.std(axis=0)
-
-    #     mean_auc = np.mean(aucs)
-    #     std_auc = np.std(aucs)
-    #     plt.plot(mean_fpr, mean_tpr, label=f'AUC:{mean_auc:0.3f} ± {std_auc:0.3f}', color=color[0])
-
-    #     plt.fill_between(
-    #         mean_fpr,
-    #         mean_tpr - std_scale * std_tpr,
-    #         mean_tpr + std_scale * std_tpr,
-    #         color=color[1], alpha=0.2, label='± 1.0 s.d.')
 
     def draw_roc_common(self, title, name=None, show=False):
         plt.plot([0, 1], [0, 1], linestyle='--', color='gray', linewidth=1)
@@ -533,6 +575,7 @@ class CLI(BaseMLCLI):
         plt.xlabel('1 - Specificity')
         plt.legend(loc='lower right')
         plt.title(title)
+        plt.subplots_adjust(bottom=0.15, left=0.15, top=0.85)
         if name:
             plt.savefig(J('out/fig2', name))
         if show:
@@ -545,7 +588,9 @@ class CLI(BaseMLCLI):
         plt.xlabel('Recall')
         plt.ylabel('Precision')
         plt.legend(loc='lower left')
+        plt.subplots_adjust(bottom=0.15, left=0.15)
         plt.title(title)
+        plt.subplots_adjust(bottom=0.15, left=0.15, top=0.85)
         if name:
             plt.savefig(J('out/fig2', name))
         if show:
