@@ -47,10 +47,19 @@ sns.set_palette('tab10')
 plt.rcParams['ytick.direction'] = 'in' #y軸の目盛りの向き
 plt.rcParams['ytick.minor.visible'] = True  #y軸補助目盛りの追加
 plt.rcParams['ytick.left'] = True  #y軸の右部目盛り
-# plt.rcParams['font.size'] = 16
+plt.rcParams['font.size'] = 16
 
 json.encoder.FLOAT_REPR = lambda x: print(x) or format(x, '.8f')
 J = os.path.join
+
+def significant(v):
+    if v < 0.001:
+        return '***'
+    if v < 0.01:
+        return '**'
+    if v < 0.05:
+        return '*'
+    return 'n.s.'
 
 def permutation_test_between_clfs(y_test, pred_proba_1, pred_proba_2, nsamples=1000):
     print(nsamples)
@@ -473,12 +482,12 @@ class CLI(BaseMLCLI):
             for (x, y) in zip(xx, yy):
                 aucs.append(skmetrics.auc(x, y))
             for i, auc in enumerate(aucs):
-                dd.append({'auc': auc, 'setting': code, 'fold': i+1})
+                dd.append({'value': auc, 'setting': code, 'fold': i+1})
         data = pd.DataFrame(dd)
         fig, ax = plt.subplots(figsize=(6, 4), dpi=300)
         if a.graph == 'box':
             sns.boxplot(
-                data=data, x='setting', y='auc', hue='setting',
+                data=data, x='setting', y='value', hue='setting',
                 width=.5,
                 # capsize=.1, errorbar=('ci', 95),
                 # alpha=0.7,
@@ -492,7 +501,7 @@ class CLI(BaseMLCLI):
 
             sns.swarmplot(
             # sns.stripplot(
-                data=data, x='setting', y='auc', hue='setting',
+                data=data, x='setting', y='value', hue='setting',
                 # palette=['lightblue', 'lightgreen', 'lightcoral'],
                 alpha=0.7,
                 palette=['grey']*3,
@@ -501,29 +510,37 @@ class CLI(BaseMLCLI):
                 ax=ax,
             )
 
+            values_A = data[data['setting'] == 'A']['value']
+            values_B = data[data['setting'] == 'B']['value']
+            values_C = data[data['setting'] == 'C']['value']
+
             # A vs C
+            __, p_A_C = stats.ttest_rel(values_A, values_C)
+            print('A vs C', p_A_C)
+            sig_A_C = significant(p_A_C)
+
             # A vs B
+            __, p_A_B = stats.ttest_rel(values_A, values_B)
+            sig_A_B = significant(p_A_B)
+            print('A vs B', p_A_B)
 
             asterisk_tuples = [
-                (0, 1, "*"), # A vs C
-                (0, 2, "*"), # B vs C
+                (1, 2, sig_A_B), # B vs C
+                (0, 2, sig_A_C), # A vs C
             ]
 
             annotate_brackets(
                 asterisk_tuples,
                 center=np.arange(3),
-                height=[np.max(data['auc'])]*3,
+                height=[np.max(data['value'])]*3,
                 color='gray',
-                margin=0.01,
+                margin=0.003,
             )
-            # ax.yaxis.set_major_locator(MultipleLocator(0.01))
-            # ax.set_ylim(int(np.min(data['auc']))/10, (np.max(data['auc'])*10).round()/10)
-            y0 = int(np.min(data['auc'])*10)/10
-            y1 = min(round(np.max(data['auc'])*10+1)/10, 1.0)
-            ax.set_ylim(y0, y1)
+            ymin, ymax = ax.get_ylim()
+            ax.set_ylim(ymin, ymax+0.015)
         elif a.graph == 'bar':
             bars = sns.barplot(
-                data=data, x='setting', y='auc', hue='setting',
+                data=data, x='setting', y='value', hue='setting',
                 width=.5,
                 # capsize=.1,
                 errorbar=('ci', 95),
@@ -537,7 +554,7 @@ class CLI(BaseMLCLI):
             raise RuntimeError(f'Invalid graph: {a.graph}')
         plt.ylabel(a.curve.upper() + ' AUC')
         # plt.grid(axis='y')
-        # plt.legend().set_visible(False)
+        # ax.get_legend().remove()
         plt.subplots_adjust(bottom=0.15, left=0.15)
         plt.savefig(f'out/fig2/{a.depth}/all_{a.graph}_{a.curve}.png')
         if not a.noshow:
@@ -558,13 +575,14 @@ class CLI(BaseMLCLI):
                 # i = np.argmax(f1)
                 i = np.argmax(tpr - fpr)
                 # print(fold, 'acc', np.max(acc), 'f1', np.max(f1))
-                dd.append({'acc': np.max(acc), 'f1': np.max(f1), 'setting': setting, 'fold': i+1})
+                value = acc if a.metric == 'acc' else f1
+                dd.append({'value': np.max(value), 'setting': setting, 'fold': i+1})
 
         data = pd.DataFrame(dd)
         fig, ax = plt.subplots(figsize=(6, 4), dpi=300)
         if a.graph == 'box':
             sns.boxplot(
-                data=data, x='setting', y=a.metric, hue='setting',
+                data=data, x='setting', y='value', hue='setting',
                 width=.5,
                 # capsize=.1, errorbar=('ci', 95),
                 # alpha=0.7,
@@ -578,7 +596,7 @@ class CLI(BaseMLCLI):
 
             sns.swarmplot(
             # sns.stripplot(
-                data=data, x='setting', y=a.metric, hue='setting',
+                data=data, x='setting', y='value', hue='setting',
                 # palette=['lightblue', 'lightgreen', 'lightcoral'],
                 alpha=0.7,
                 palette=['gray']*3,
@@ -587,32 +605,37 @@ class CLI(BaseMLCLI):
                 ax=ax,
             )
 
+            values_A = data[data['setting'] == 'A']['value']
+            values_B = data[data['setting'] == 'B']['value']
+            values_C = data[data['setting'] == 'C']['value']
+
             # A vs C
+            __, p_A_C = stats.ttest_rel(values_A, values_C)
+            print('A vs C', p_A_C)
+            sig_A_C = significant(p_A_C)
+
             # A vs B
+            __, p_A_B = stats.ttest_rel(values_A, values_B)
+            sig_A_B = significant(p_A_B)
+            print('A vs B', p_A_B)
 
             asterisk_tuples = [
-                (0, 1, "*"), # A vs C
-                (0, 2, "*"), # B vs C
+                (1, 2, sig_A_B), # B vs C
+                (0, 2, sig_A_C), # A vs C
             ]
 
             annotate_brackets(
                 asterisk_tuples,
                 center=np.arange(3),
-                height=[np.max(data[a.metric])]*3,
+                height=[np.max(data['value'])]*3,
                 color='gray',
-                margin=0.01,
+                margin=0.003,
             )
-            # ax.yaxis.set_major_locator(MultipleLocator(0.01))
-            # ax.set_ylim(int(np.min(data['auc']))/10, (np.max(data['auc'])*10).round()/10)
-            y0 = int(np.min(data[a.metric])*10)/10
-            y1 = min(round(np.max(data[a.metric])*10)/10, 1.0)
-            ax.set_ylim(y0, y1)
-
-            # ax.yaxis.set_major_locator(MultipleLocator(0.05))
-            # ax.set_ylim(0.6, 0.9)
+            ymin, ymax = ax.get_ylim()
+            ax.set_ylim(ymin, ymax+0.015)
         elif a.graph == 'bar':
             sns.barplot(
-                data=data, x='setting', y=a.metric, hue='setting',
+                data=data, x='setting', y='value', hue='setting',
                 width=.5,
                 # capsize=.1,
                 errorbar=('ci', 95),
@@ -626,8 +649,8 @@ class CLI(BaseMLCLI):
             raise RuntimeError(f'Invalid graph: {a.graph}')
         # plt.grid(axis='y')
         plt.ylabel({'acc': 'Accuracy', 'f1': 'F1 score'}[a.metric])
-        plt.legend().set_visible(False)
-        # plt.subplots_adjust(bottom=0.15, left=0.15)
+        # ax.get_legend().remove()
+        plt.subplots_adjust(bottom=0.15, left=0.15)
         plt.savefig(f'out/fig2/{a.depth}/all_{a.graph}_{a.metric}.png')
         if not a.noshow:
             plt.show()
