@@ -501,6 +501,7 @@ class CLI(BaseMLCLI):
                 ax=ax,
             )
 
+            # A vs C
             # A vs B
 
             asterisk_tuples = [
@@ -514,16 +515,12 @@ class CLI(BaseMLCLI):
                 height=[np.max(data['auc'])]*3,
                 color='gray',
                 margin=0.01,
-                # dh=.03,
-                # fs=8,
-                # text_dh=0.005
             )
-
             # ax.yaxis.set_major_locator(MultipleLocator(0.01))
             # ax.set_ylim(int(np.min(data['auc']))/10, (np.max(data['auc'])*10).round()/10)
-            min = int(np.min(data['auc'])*10)/10
-            max = max(round(np.max(data['auc'])*10+1)/10, 1.0)
-            ax.set_ylim(min, max)
+            y0 = int(np.min(data['auc'])*10)/10
+            y1 = min(round(np.max(data['auc'])*10+1)/10, 1.0)
+            ax.set_ylim(y0, y1)
         elif a.graph == 'bar':
             bars = sns.barplot(
                 data=data, x='setting', y='auc', hue='setting',
@@ -579,16 +576,38 @@ class CLI(BaseMLCLI):
                 ax=ax,
             )
 
-            # sns.stripplot(
             sns.swarmplot(
+            # sns.stripplot(
                 data=data, x='setting', y=a.metric, hue='setting',
                 # palette=['lightblue', 'lightgreen', 'lightcoral'],
                 alpha=0.7,
-                palette=['grey'],
+                palette=['gray']*3,
                 # marker='X',
                 size=5,
                 ax=ax,
             )
+
+            # A vs C
+            # A vs B
+
+            asterisk_tuples = [
+                (0, 1, "*"), # A vs C
+                (0, 2, "*"), # B vs C
+            ]
+
+            annotate_brackets(
+                asterisk_tuples,
+                center=np.arange(3),
+                height=[np.max(data[a.metric])]*3,
+                color='gray',
+                margin=0.01,
+            )
+            # ax.yaxis.set_major_locator(MultipleLocator(0.01))
+            # ax.set_ylim(int(np.min(data['auc']))/10, (np.max(data['auc'])*10).round()/10)
+            y0 = int(np.min(data[a.metric])*10)/10
+            y1 = min(round(np.max(data[a.metric])*10)/10, 1.0)
+            ax.set_ylim(y0, y1)
+
             # ax.yaxis.set_major_locator(MultipleLocator(0.05))
             # ax.set_ylim(0.6, 0.9)
         elif a.graph == 'bar':
