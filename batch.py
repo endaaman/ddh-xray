@@ -14,6 +14,7 @@ from matplotlib.ticker import MultipleLocator, FormatStrFormatter
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import matplotlib.cm as cm
 import mpl_toolkits.mplot3d as mp3d
+from vistats import annotate_brackets
 from sklearn import metrics as skmetrics
 from scipy import stats
 import numpy as np
@@ -43,9 +44,9 @@ sns.set_palette('tab10')
 # plt.rcParams["xtick.minor.visible"] = True  #x軸補助目盛りの追加
 # plt.rcParams['xtick.bottom'] = True  #x軸の上部目盛り
 plt.rcParams['ytick.direction'] = 'in' #y軸の目盛りの向き
-plt.rcParams["ytick.minor.visible"] = True  #y軸補助目盛りの追加
+plt.rcParams['ytick.minor.visible'] = True  #y軸補助目盛りの追加
 plt.rcParams['ytick.left'] = True  #y軸の右部目盛り
-plt.rcParams['font.size'] = 16
+# plt.rcParams['font.size'] = 16
 
 json.encoder.FLOAT_REPR = lambda x: print(x) or format(x, '.8f')
 J = os.path.join
@@ -473,7 +474,6 @@ class CLI(BaseMLCLI):
             for i, auc in enumerate(aucs):
                 dd.append({'auc': auc, 'setting': code, 'fold': i+1})
         data = pd.DataFrame(dd)
-        # plt.figure(figsize=(6, 4), dpi=300)
         fig, ax = plt.subplots(figsize=(6, 4), dpi=300)
         if a.graph == 'box':
             sns.boxplot(
@@ -489,8 +489,8 @@ class CLI(BaseMLCLI):
                 ax=ax,
             )
 
-            # sns.stripplot(
             sns.swarmplot(
+            # sns.stripplot(
                 data=data, x='setting', y='auc', hue='setting',
                 # palette=['lightblue', 'lightgreen', 'lightcoral'],
                 alpha=0.7,
@@ -499,10 +499,27 @@ class CLI(BaseMLCLI):
                 size=5,
                 ax=ax,
             )
+
+            # A vs B
+
+            asterisk_tuples = [
+                (0, 1, "*"), # A vs C
+                (0, 2, "*"), # B vs C
+            ]
+
+            annotate_brackets(
+                asterisk_tuples,
+                center=np.arange(3),
+                height=[np.max(data['auc'])]*3,
+                color='gray',
+                # dh=2,
+                # yerr=sems.tolist(),
+            )
+
             # ax.yaxis.set_major_locator(MultipleLocator(0.01))
             # ax.set_ylim(0.6, 0.9)
         elif a.graph == 'bar':
-            sns.barplot(
+            bars = sns.barplot(
                 data=data, x='setting', y='auc', hue='setting',
                 width=.5,
                 # capsize=.1,
@@ -517,6 +534,7 @@ class CLI(BaseMLCLI):
             raise RuntimeError(f'Invalid graph: {a.graph}')
         plt.ylabel(a.curve.upper() + ' AUC')
         # plt.grid(axis='y')
+        plt.legend().set_visible(False)
         plt.subplots_adjust(bottom=0.15, left=0.15)
         plt.savefig(f'out/fig2/{a.depth}/all_{a.graph}_{a.curve}.png')
         if not a.noshow:
@@ -537,7 +555,6 @@ class CLI(BaseMLCLI):
                 # i = np.argmax(f1)
                 i = np.argmax(tpr - fpr)
                 # print(fold, 'acc', np.max(acc), 'f1', np.max(f1))
-
                 dd.append({'acc': np.max(acc), 'f1': np.max(f1), 'setting': setting, 'fold': i+1})
 
         data = pd.DataFrame(dd)
@@ -584,15 +601,11 @@ class CLI(BaseMLCLI):
             raise RuntimeError(f'Invalid graph: {a.graph}')
         # plt.grid(axis='y')
         plt.ylabel({'acc': 'Accuracy', 'f1': 'F1 score'}[a.metric])
-        plt.subplots_adjust(bottom=0.15, left=0.15)
+        plt.legend().set_visible(False)
+        # plt.subplots_adjust(bottom=0.15, left=0.15)
         plt.savefig(f'out/fig2/{a.depth}/all_{a.graph}_{a.metric}.png')
         if not a.noshow:
             plt.show()
-
-
-        # self.data_A = data_A
-        # self.data_B = data_B
-        # self.data_C = data_C
 
 
     def draw_curve_with_ci(self, xx, yy, fill=True, label='{}', color=['blue', 'lightblue'], std_scale=2):
