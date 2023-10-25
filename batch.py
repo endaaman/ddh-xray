@@ -1,5 +1,6 @@
 import os
 from glob import glob
+import math
 import json
 from itertools import combinations
 
@@ -494,7 +495,7 @@ class CLI(BaseMLCLI):
                 data=data, x='setting', y='auc', hue='setting',
                 # palette=['lightblue', 'lightgreen', 'lightcoral'],
                 alpha=0.7,
-                palette=['grey'],
+                palette=['grey']*3,
                 # marker='X',
                 size=5,
                 ax=ax,
@@ -512,12 +513,17 @@ class CLI(BaseMLCLI):
                 center=np.arange(3),
                 height=[np.max(data['auc'])]*3,
                 color='gray',
-                # dh=2,
-                # yerr=sems.tolist(),
+                margin=0.01,
+                # dh=.03,
+                # fs=8,
+                # text_dh=0.005
             )
 
             # ax.yaxis.set_major_locator(MultipleLocator(0.01))
-            # ax.set_ylim(0.6, 0.9)
+            # ax.set_ylim(int(np.min(data['auc']))/10, (np.max(data['auc'])*10).round()/10)
+            min = int(np.min(data['auc'])*10)/10
+            max = max(round(np.max(data['auc'])*10+1)/10, 1.0)
+            ax.set_ylim(min, max)
         elif a.graph == 'bar':
             bars = sns.barplot(
                 data=data, x='setting', y='auc', hue='setting',
@@ -534,7 +540,7 @@ class CLI(BaseMLCLI):
             raise RuntimeError(f'Invalid graph: {a.graph}')
         plt.ylabel(a.curve.upper() + ' AUC')
         # plt.grid(axis='y')
-        plt.legend().set_visible(False)
+        # plt.legend().set_visible(False)
         plt.subplots_adjust(bottom=0.15, left=0.15)
         plt.savefig(f'out/fig2/{a.depth}/all_{a.graph}_{a.curve}.png')
         if not a.noshow:
