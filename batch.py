@@ -61,8 +61,36 @@ def significant(v):
         return '*'
     return 'n.s.'
 
+def plot_significant(ax, values_A, values_B, values_C, margin=0):
+    # A vs C
+    __, p_A_C = stats.ttest_rel(values_A, values_C)
+    print('A vs C', p_A_C)
+    sig_A_C = significant(p_A_C)
+
+    # B vs C
+    __, p_B_C = stats.ttest_rel(values_B, values_C)
+    sig_B_C = significant(p_B_C)
+    print('B vs C', p_B_C)
+
+    asterisk_tuples = [
+        (2, 1, sig_B_C), # B vs C
+        (2, 0, sig_A_C), # A vs C
+    ]
+
+    annotate_brackets(
+        asterisk_tuples,
+        center=np.arange(3),
+        height=[np.max([values_A, values_B, values_C])]*3,
+        color='gray',
+        margin=0.01,
+        fs=14,
+        ax=ax,
+    )
+    ymin, ymax = ax.get_ylim()
+    ax.set_ylim(ymin, ymax+margin)
+
+
 def permutation_test_between_clfs(y_test, pred_proba_1, pred_proba_2, nsamples=1000):
-    print(nsamples)
     auc_differences = []
     auc1 = skmetrics.roc_auc_score(y_test.ravel(), pred_proba_1.ravel())
     auc2 = skmetrics.roc_auc_score(y_test.ravel(), pred_proba_2.ravel())
@@ -485,6 +513,7 @@ class CLI(BaseMLCLI):
                 dd.append({'value': auc, 'setting': code, 'fold': i+1})
         data = pd.DataFrame(dd)
         fig, ax = plt.subplots(figsize=(6, 4), dpi=300)
+
         if a.graph == 'box':
             sns.boxplot(
                 data=data, x='setting', y='value', hue='setting',
@@ -510,41 +539,13 @@ class CLI(BaseMLCLI):
                 ax=ax,
             )
 
-            values_A = data[data['setting'] == 'A']['value']
-            values_B = data[data['setting'] == 'B']['value']
-            values_C = data[data['setting'] == 'C']['value']
-
-            # A vs C
-            __, p_A_C = stats.ttest_rel(values_A, values_C)
-            print('A vs C', p_A_C)
-            sig_A_C = significant(p_A_C)
-
-            # A vs B
-            __, p_A_B = stats.ttest_rel(values_A, values_B)
-            sig_A_B = significant(p_A_B)
-            print('A vs B', p_A_B)
-
-            asterisk_tuples = [
-                (1, 2, sig_A_B), # B vs C
-                (0, 2, sig_A_C), # A vs C
-            ]
-
-            annotate_brackets(
-                asterisk_tuples,
-                center=np.arange(3),
-                height=[np.max(data['value'])]*3,
-                color='gray',
-                margin=0.003,
-            )
-            ymin, ymax = ax.get_ylim()
-            ax.set_ylim(ymin, ymax+0.015)
         elif a.graph == 'bar':
             bars = sns.barplot(
                 data=data, x='setting', y='value', hue='setting',
                 width=.5,
-                # capsize=.1,
+                capsize=.2,
                 errorbar=('ci', 95),
-                err_kws={"color": "gray", "linewidth": 2.0, "alpha": 0.7},
+                err_kws={"color": "gray", "linewidth": 1.0},
                 # edgecolor=['royalblue', 'forestgreen', 'crimson'],
                 palette=['lightblue', 'lightgreen', 'lightcoral'],
                 alpha=0.8,
@@ -552,10 +553,18 @@ class CLI(BaseMLCLI):
             )
         else:
             raise RuntimeError(f'Invalid graph: {a.graph}')
+
+
+        values_A = data[data['setting'] == 'A']['value']
+        values_B = data[data['setting'] == 'B']['value']
+        values_C = data[data['setting'] == 'C']['value']
+        plot_significant(ax, values_A, values_B, values_C, (0.05 if a.graph == 'bar' else 0.015))
+
+
         plt.ylabel(a.curve.upper() + ' AUC')
         # plt.grid(axis='y')
         # ax.get_legend().remove()
-        plt.subplots_adjust(bottom=0.15, left=0.15)
+        plt.subplots_adjust(bottom=0.15, left=0.2)
         plt.savefig(f'out/fig2/{a.depth}/all_{a.graph}_{a.curve}.png')
         if not a.noshow:
             plt.show()
@@ -604,42 +613,13 @@ class CLI(BaseMLCLI):
                 size=5,
                 ax=ax,
             )
-
-            values_A = data[data['setting'] == 'A']['value']
-            values_B = data[data['setting'] == 'B']['value']
-            values_C = data[data['setting'] == 'C']['value']
-
-            # A vs C
-            __, p_A_C = stats.ttest_rel(values_A, values_C)
-            print('A vs C', p_A_C)
-            sig_A_C = significant(p_A_C)
-
-            # A vs B
-            __, p_A_B = stats.ttest_rel(values_A, values_B)
-            sig_A_B = significant(p_A_B)
-            print('A vs B', p_A_B)
-
-            asterisk_tuples = [
-                (1, 2, sig_A_B), # B vs C
-                (0, 2, sig_A_C), # A vs C
-            ]
-
-            annotate_brackets(
-                asterisk_tuples,
-                center=np.arange(3),
-                height=[np.max(data['value'])]*3,
-                color='gray',
-                margin=0.003,
-            )
-            ymin, ymax = ax.get_ylim()
-            ax.set_ylim(ymin, ymax+0.015)
         elif a.graph == 'bar':
-            sns.barplot(
+            bars = sns.barplot(
                 data=data, x='setting', y='value', hue='setting',
                 width=.5,
-                # capsize=.1,
+                capsize=.2,
                 errorbar=('ci', 95),
-                err_kws={"color": "gray", "linewidth": 2.0, "alpha": 0.7},
+                err_kws={"color": "gray", "linewidth": 1.0},
                 # edgecolor=['royalblue', 'forestgreen', 'crimson'],
                 palette=['lightblue', 'lightgreen', 'lightcoral'],
                 alpha=0.8,
@@ -647,10 +627,17 @@ class CLI(BaseMLCLI):
             )
         else:
             raise RuntimeError(f'Invalid graph: {a.graph}')
+
+        values_A = data[data['setting'] == 'A']['value']
+        values_B = data[data['setting'] == 'B']['value']
+        values_C = data[data['setting'] == 'C']['value']
+
+        plot_significant(ax, values_A, values_B, values_C, (0.05 if a.graph == 'bar' else 0.015))
+
         # plt.grid(axis='y')
-        plt.ylabel({'acc': 'Accuracy', 'f1': 'F1 score'}[a.metric])
+        plt.ylabel({'acc': 'Precision', 'f1': 'F1 score'}[a.metric])
         # ax.get_legend().remove()
-        plt.subplots_adjust(bottom=0.15, left=0.15)
+        plt.subplots_adjust(bottom=0.15, left=0.2)
         plt.savefig(f'out/fig2/{a.depth}/all_{a.graph}_{a.metric}.png')
         if not a.noshow:
             plt.show()
@@ -708,7 +695,7 @@ class CLI(BaseMLCLI):
 
     class CsorArgs(CommonArgs):
         target: str = Field(..., regex=r'^mean|max$')
-
+        noshow: bool = Field(False, cli=('--noshow', ))
 
     def run_csor(self, a):
         df_org =  pd.read_excel('data/cams/powers_aggr.xlsx', usecols=list(range(1, 31)), index_col=0)
@@ -728,16 +715,19 @@ class CLI(BaseMLCLI):
                 'name': 'Bilateral',
                 'arm1': ['neg bilateral', 'Negative'],
                 'arm2': ['pos bilateral', 'Positive'],
+                'palette': ['bisque', 'darkorange'],
                 'paired': False
             }, {
                 'name': 'Positive',
                 'arm1': ['healthy', 'Healthy'],
                 'arm2': ['affected', 'Affected'],
+                'palette': ['bisque', 'darkorange'],
                 'paired': True,
             }, {
                 'name': 'Negative',
                 'arm1': ['neg left', 'Left'],
                 'arm2': ['neg right', 'Right'],
+                'palette': ['bisque', 'bisque'],
                 'paired': True,
             },
         ]
@@ -747,53 +737,34 @@ class CLI(BaseMLCLI):
                 'name': 'Bilateral',
                 'arm1': ['neg bilateral max', 'Negative'],
                 'arm2': ['pos bilateral max', 'Positive'],
+                'palette': ['bisque', 'darkorange'],
                 'paired': False
             }, {
                 'name': 'Positive',
                 'arm1': ['healthy max', 'Healthy'],
                 'arm2': ['affected max', 'Affected'],
+                'palette': ['bisque', 'darkorange'],
                 'paired': True,
             }, {
                 'name': 'Negative',
                 'arm1': ['neg left max', 'Left'],
                 'arm2': ['neg right max', 'Right'],
+                'palette': ['bisque', 'bisque'],
                 'paired': True,
-            # }, {
-            #     'name': 'Total vs Healthy',
-            #     'arm1': ['total max', 'Total'],
-            #     'arm2': ['healthy max', 'Healthy'],
-            #     'paired': False,
             }
         ]
 
         recipe = mean_recipe if a.target == 'mean' else max_recipe
 
-        def plot(ax, data):
-            # ax.axhline(y=1.0, color='grey', linewidth=.5)
-            ax.grid(axis='y')
-            sns.barplot(data=data, x='name', y=col_value, hue='name', ax=ax,
-                        # edgecolor=['tab:blue', 'tab:orange'],
-                        palette=['tab:blue', 'tab:orange'],
-                        alpha=0.7,
-                        capsize=.4,
-                        errorbar=('ci', 95),
-                        err_kws={'linewidth': 1},
-                        )
-
-            # sns.boxplot(data=data, x='name', y=col_value, ax=ax)
-
         sns.set_palette(sns.color_palette())
-        fig, axes = plt.subplots(1, len(recipe), sharey=True, figsize=(6, len(recipe)*3), dpi=300)
+        fig, axes = plt.subplots(1, len(recipe), sharey=True, figsize=(len(recipe)*3, 6), dpi=300)
         fig.suptitle(f'Comparison of {a.target} CAM Score on ROI')
 
         for i, r in enumerate(recipe):
-            print(r)
             df1 = select_col(r['arm1'][0], r['arm1'][1])
             df2 = select_col(r['arm2'][0], r['arm2'][1])
             df_c = pd.concat([df1, df2])
             print(r['name'], r['arm1'][1], 'vs', r['arm2'][1])
-            print(df1[col_value])
-            print(df2[col_value])
             if r['paired']:
                 __, p  = stats.wilcoxon(df1[col_value], df2[col_value], alternative='two-sided')
                 print('\t wilcoxon', p)
@@ -801,11 +772,41 @@ class CLI(BaseMLCLI):
                 __, p = stats.mannwhitneyu(df1[col_value], df2[col_value], alternative='two-sided')
                 print('\t U test', p)
             ax = axes[i]
-            plot(ax, df_c)
+            sns.barplot(
+                data=df_c, x='name', y=col_value, hue='name',
+                width=.5,
+                capsize=.2,
+                errorbar=('ci', 95),
+                err_kws={"color": "gray", "linewidth": 1.0},
+                palette=r['palette'],
+                alpha=0.8,
+                ax=ax,
+            )
             ax.set(xlabel=r['name'])
 
+            asterisk_tuples = [
+                (0, 1, significant(p)),
+            ]
+
+            margin = 0.2 if a.target == 'mean' else 0.4
+
+            annotate_brackets(
+                asterisk_tuples,
+                center=np.arange(2),
+                height=[np.max([ df1[col_value].mean(), df2[col_value].mean()] ) + margin*2] * 2,
+                color='gray',
+                margin=-0.1,
+                fs=14,
+                ax=ax,
+            )
+        # use last ax
+        ymin, ymax = ax.get_ylim()
+        ax.set_ylim(ymin, ymax+margin)
+
+        plt.subplots_adjust(bottom=0.15, left=0.2)
         plt.savefig(f'out/fig3/bars_{a.target}.png')
-        plt.show()
+        if not a.noshow:
+            plt.show()
 
     def run_surface(self, a):
         id = 32
