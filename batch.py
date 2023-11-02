@@ -10,7 +10,7 @@ from tqdm import tqdm
 import pandas as pd
 import seaborn as sns
 import matplotlib
-from matplotlib import pyplot as plt
+from matplotlib import pyplot as plt, animation, colors as mcolors
 from matplotlib.ticker import MultipleLocator, FormatStrFormatter
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import matplotlib.cm as cm
@@ -47,7 +47,7 @@ sns.set_palette('tab10')
 plt.rcParams['ytick.direction'] = 'in' #y軸の目盛りの向き
 plt.rcParams['ytick.minor.visible'] = True  #y軸補助目盛りの追加
 plt.rcParams['ytick.left'] = True  #y軸の右部目盛り
-plt.rcParams['font.size'] = 16
+plt.rcParams['font.size'] = 14
 
 json.encoder.FLOAT_REPR = lambda x: print(x) or format(x, '.8f')
 J = os.path.join
@@ -366,6 +366,61 @@ class CLI(BaseMLCLI):
         if not a.noshow:
             plt.show()
 
+    def run_compare_importance(self, a):
+        df = pd.read_excel('out/importance.xlsx', index_col=0)
+        print(df)
+        r = [
+            ['a', 'Yamamuro A'],
+            ['b', 'Yamamuro B'],
+            ['alpha', 'Acetabular index'],
+            ['oe', 'O-edge angle'],
+        ]
+        fig, axes = plt.subplots(nrows=1, ncols=4, figsize=(8, 5), dpi=300, sharey=True)
+
+        for i, (name, label) in enumerate(r):
+            ax = axes[i]
+            left_values = df['left_' + name].values
+            right_values = df['right_' + name].values
+            data_left = pd.DataFrame({
+                label: 'Left',
+                'importance': left_values,
+            })
+            data_right = pd.DataFrame({
+                label: 'Right',
+                'importance': right_values,
+            })
+            sns.barplot(
+                data=pd.concat([data_right, data_left]), x=label, y='importance', hue=label,
+                width=.5,
+                capsize=.2,
+                errorbar=('ci', 95),
+                err_kws={'color': 'gray', 'linewidth': 1.0},
+                palette=['bisque', 'darkorange', ],
+                alpha=0.8,
+                ax=ax,
+            )
+
+            __, p_value = stats.ttest_rel(left_values, right_values)
+
+            annotate_brackets(
+                [
+                    (0, 1, significant(p_value)),
+                ],
+                center=np.arange(2),
+                height=[np.max([left_values, right_values])]*3,
+                color='gray',
+                margin=0.01,
+                fs=14,
+                ax=ax,
+            )
+
+        ymin, ymax = ax.get_ylim()
+        ax.set_ylim(ymin, ymax+50)
+        fig.tight_layout(pad=1.0)
+        plt.subplots_adjust(bottom=0.15, left=0.2)
+        plt.savefig('out/fig4/importance.png')
+        plt.show()
+
 
     class ImageCurveByFoldsArgs(CommonArgs):
         curve: str = Field(..., regex=r'^roc|pr$')
@@ -561,7 +616,9 @@ class CLI(BaseMLCLI):
         plot_significant(ax, values_A, values_B, values_C, (0.05 if a.graph == 'bar' else 0.015))
 
 
-        plt.ylabel(a.curve.upper() + ' AUC')
+        title = a.curve.upper() + ' AUC'
+        plt.ylabel(title)
+        plt.title(title)
         # plt.grid(axis='y')
         # ax.get_legend().remove()
         plt.subplots_adjust(bottom=0.15, left=0.2)
@@ -635,7 +692,9 @@ class CLI(BaseMLCLI):
         plot_significant(ax, values_A, values_B, values_C, (0.05 if a.graph == 'bar' else 0.015))
 
         # plt.grid(axis='y')
-        plt.ylabel({'acc': 'Precision', 'f1': 'F1 score'}[a.metric])
+        title = {'acc': 'Precision', 'f1': 'F1 score'}[a.metric]
+        plt.title(title)
+        plt.ylabel(title)
         # ax.get_legend().remove()
         plt.subplots_adjust(bottom=0.15, left=0.2)
         plt.savefig(f'out/fig2/{a.depth}/all_{a.graph}_{a.metric}.png')
@@ -725,8 +784,8 @@ class CLI(BaseMLCLI):
                 'paired': True,
             }, {
                 'name': 'Negative',
-                'arm1': ['neg left', 'Left'],
-                'arm2': ['neg right', 'Right'],
+                'arm1': ['neg right', 'Right'],
+                'arm2': ['neg left', 'Left'],
                 'palette': ['bisque', 'bisque'],
                 'paired': True,
             },
@@ -747,8 +806,8 @@ class CLI(BaseMLCLI):
                 'paired': True,
             }, {
                 'name': 'Negative',
-                'arm1': ['neg left max', 'Left'],
-                'arm2': ['neg right max', 'Right'],
+                'arm1': ['neg right max', 'Right'],
+                'arm2': ['neg left max', 'Left'],
                 'palette': ['bisque', 'bisque'],
                 'paired': True,
             }
@@ -808,21 +867,32 @@ class CLI(BaseMLCLI):
         if not a.noshow:
             plt.show()
 
+    class SurfaceArgs(CommonArgs):
+        id: int = 44
+        animate: bool = Field(False, cli=('--animate', ))
+        cmap: str = 'jet'
+        grayed: bool = Field(False, cli=('--grayed', ))
+
     def run_surface(self, a):
-        id = 32
-        side = 'left'
-        roi = read_label_as_df(f'data/labels/{id:04}.txt')
-        target_label = [1,2,3] if side == 'right' else [4,5,6]
-        brois = roi[roi['label'].isin(target_label)]
-        hroi = np.array([
-            brois['x0'].min(),
-            brois['y0'].min(),
-            brois['x1'].max(),
-            brois['y1'].max(),
-        ]).round().astype(int)
+        roi = read_label_as_df(f'data/labels/{a.id:04}.txt')
+        # target_label = [1,2,3] if side == 'right' else [4,5,6]
+        hrois = {}
+        for side, idx in (('left', [4,5,6]), ('right', [1,2,3])):
+            brois = roi[roi['label'].isin(idx)]
+            hroi = np.array([
+                brois['x0'].min(),
+                brois['y0'].min(),
+                brois['x1'].max(),
+                brois['y1'].max(),
+            ]).round().astype(int)
+            # offset for center 512px
+            hroi -= (624 - 512)//2
+            hrois[side] = hroi
 
+        left_hroi = hrois['left']
+        right_hroi = hrois['right']
 
-        mask = Image.open(f'data/cams/crop/{id:04}_mask_pos.png')
+        mask = Image.open(f'data/cams/crop/{a.id:04}_mask_pos.png')
         mask = np.array(mask) / 255
 
         mask = mask / mask.sum() * mask.shape[0] * mask.shape[1]
@@ -830,29 +900,58 @@ class CLI(BaseMLCLI):
         fig = plt.figure(figsize=(12, 8))
 
         ax = fig.add_subplot(121)
-        im = ax.imshow(mask, cmap='jet')
+        im = ax.imshow(mask, cmap=a.cmap)
 
         ax = fig.add_subplot(122, projection='3d')
         y = np.arange(mask.shape[0])
         x = np.arange(mask.shape[1])
         X, Y = np.meshgrid(x, y)
-        surf = ax.plot_surface(Y, X, mask, cmap='jet', linewidth=0.01)
-        # surf = ax.plot_trisurf(Y, X, mask, cmap='jet')
 
-        # mean_surf = ax.plot_surface(Y, X, np.ones(mask.shape), cstride=2, rstride=1, cmap=cm.Blues, linewidth=0, antialiased=False, alpha=0.5)
+        cmap = plt.get_cmap(a.cmap)
+        normalize = mcolors.Normalize(vmin=np.min(mask), vmax=np.max(mask))
 
-        # surf1 = ax.plot_surface(X, Y, mask,
-        #                         cstride=2, rstride=1,
-        #                         cmap=cm.Oranges, linewidth=0, antialiased=False, alpha=0.3)
+        # REGIONAL
+        if a.grayed:
+            colors = np.full((X.shape[0], X.shape[0], 4), (.0, .0, .0, .0), dtype=float)
+            for yi, yv in enumerate(y):
+                for xi, xv in enumerate(x):
+                    v = mask[yi, xi]
+                    c = np.array(cmap(normalize(v)))
+                    if left_hroi[0] < xi < left_hroi[2] and left_hroi[1] < yi < left_hroi[3]:
+                        colors[yi, xi] = c
+                        continue
+                    if right_hroi[0] < xi < right_hroi[2] and right_hroi[1] < yi < right_hroi[3]:
+                        colors[yi, xi] = c
+                        continue
+                    # c = np.clip(c - np.array([.5]*3 + [.0]), 0.0, 1.0)
+                    # colors[yi, xi] = c
+                    # c[-1] = 0.8
+                    colors[yi, xi] = np.array([.4, .4, .4, 0.1])
+            # print(colors.shape)
+            surf = ax.plot_surface(Y, X, mask,
+                                   linewidth=0.5,
+                                   facecolors=colors,
+                                   shade=False,
+                                   cmap='jet')
+        else:
+            # surf = ax.plot_surface(Y, X, mask, linewidth=0.5, cmap='jet', antialiased=False)
+            surf = ax.plot_wireframe(Y, X, mask, linewidth=0.5, cmap='jet', antialiased=False)
+        fig.colorbar(surf, shrink=0.5, aspect=10)
+        ax.view_init(elev=30, azim=30)
 
-        # surf2 = ax.plot_surface(X, Y, np.ones(mask.shape),
-        #                         cstride=2, rstride=1,
-        #                         cmap=cm.Blues, linewidth=0, antialiased=False, alpha=0.3)
+        if not a.animate:
+            plt.savefig('out/fig3/surface.png')
+            plt.show()
+            return
 
-        # ax.zaxis.set_major_locator(LinearLocator(10))
-        # ax.zaxis.set_major_formatter(FormatStrFormatter('%.02f'))
-        # fig.colorbar(surf, ax=ax, aspect=5)
-        plt.show()
+        def angle(i):
+            # azimuth angle : 0 deg to 360 deg
+            ax.view_init(elev=20, azim=i*4)
+            return fig,
+
+        ani = animation.FuncAnimation(fig, angle, init_func=None, frames=90, interval=50, blit=True)
+        ani.save('out/fig3/surface.gif', writer='imagemagick', fps=1000/50)
+        ani.save('out/fig3/surface.mp4', writer='ffmpeg', fps=1000/50)
 
 
 
