@@ -640,9 +640,8 @@ class CLI(BaseMLCLI):
                 tpr, fpr, acc, f1 = row['tpr'], row['fpr'], row['acc'], row['f1']
                 # i = np.argmax(f1)
                 i = np.argmax(tpr - fpr)
-                # print(fold, 'acc', np.max(acc), 'f1', np.max(f1))
                 value = acc if a.metric == 'acc' else f1
-                dd.append({'value': np.max(value), 'setting': setting, 'fold': i+1})
+                dd.append({'value': np.max(value), 'setting': setting, 'threshold': i+1})
 
         data = pd.DataFrame(dd)
         fig, ax = plt.subplots(figsize=(6, 4), dpi=300)
@@ -698,6 +697,7 @@ class CLI(BaseMLCLI):
         # ax.get_legend().remove()
         plt.subplots_adjust(bottom=0.15, left=0.2)
         plt.savefig(f'out/fig2/{a.depth}/all_{a.graph}_{a.metric}.png')
+        data.to_excel(f'out/fig2/{a.depth}/{a.metric}.xlsx')
         if not a.noshow:
             plt.show()
 
