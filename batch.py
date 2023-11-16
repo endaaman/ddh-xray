@@ -47,7 +47,8 @@ sns.set_palette('tab10')
 plt.rcParams['ytick.direction'] = 'in' #y軸の目盛りの向き
 plt.rcParams['ytick.minor.visible'] = True  #y軸補助目盛りの追加
 plt.rcParams['ytick.left'] = True  #y軸の右部目盛り
-plt.rcParams['font.size'] = 14
+plt.rcParams['font.size'] = 12
+plt.rcParams['text.color'] = 'black'
 
 json.encoder.FLOAT_REPR = lambda x: print(x) or format(x, '.8f')
 J = os.path.join
@@ -362,6 +363,8 @@ class CLI(BaseMLCLI):
             color=['forestgreen', 'lightgreen'],
         )
         draw(title='Setting: B\nClinical measurements only')
+
+        os.makedirs(f'out/fig2/{a.depth}', exist_ok=True)
         plt.savefig(f'out/fig2/{a.depth}/{a.curve}_b.png')
         if not a.noshow:
             plt.show()
@@ -418,6 +421,7 @@ class CLI(BaseMLCLI):
         ax.set_ylim(ymin, ymax+50)
         fig.tight_layout(pad=1.0)
         plt.subplots_adjust(bottom=0.15, left=0.2)
+        os.makedirs('out/fig4', exist_ok=True)
         plt.savefig('out/fig4/importance.png')
         plt.show()
 
@@ -553,7 +557,7 @@ class CLI(BaseMLCLI):
         depth: str = Field(..., regex=r'^b0|b4|b8$')
         noshow: bool = Field(False, cli=('--noshow', ))
 
-    def run_compare_auc(self, a):
+    def run_compare_auc(self, a:CompareAucArgs):
         data_A, data_B, data_C = self.load_ABC(a.depth, a.seed)
         dd = []
         for code, data in (('A', data_A), ('B', data_B), ('C', data_C)):
@@ -615,8 +619,10 @@ class CLI(BaseMLCLI):
         values_C = data[data['setting'] == 'C']['value']
         plot_significant(ax, values_A, values_B, values_C, (0.05 if a.graph == 'bar' else 0.015))
 
-
-        title = a.curve.upper() + ' AUC'
+        if a.curve == 'pr':
+            title = 'AUPRC'
+        else:
+            title = 'AUROC'
         plt.ylabel(title)
         plt.title(title)
         # plt.grid(axis='y')
@@ -691,11 +697,12 @@ class CLI(BaseMLCLI):
         plot_significant(ax, values_A, values_B, values_C, (0.05 if a.graph == 'bar' else 0.015))
 
         # plt.grid(axis='y')
-        title = {'acc': 'Precision', 'f1': 'F1 score'}[a.metric]
+        title = {'acc': 'Accuracy', 'f1': 'F1 score'}[a.metric]
         plt.title(title)
         plt.ylabel(title)
         # ax.get_legend().remove()
         plt.subplots_adjust(bottom=0.15, left=0.2)
+        os.makedirs(f'out/fig2/{a.depth}', exist_ok=True)
         plt.savefig(f'out/fig2/{a.depth}/all_{a.graph}_{a.metric}.png')
         data.to_excel(f'out/fig2/{a.depth}/{a.metric}.xlsx')
         if not a.noshow:
@@ -756,7 +763,7 @@ class CLI(BaseMLCLI):
         target: str = Field(..., regex=r'^mean|max$')
         noshow: bool = Field(False, cli=('--noshow', ))
 
-    def run_csor(self, a):
+    def run_csor(self, a:CsorArgs):
         df_org =  pd.read_excel('data/cams/powers_aggr.xlsx', usecols=list(range(1, 31)), index_col=0)
         col_value = f'{a.target} CSoR'
 
@@ -771,19 +778,19 @@ class CLI(BaseMLCLI):
 
         mean_recipe = [
             {
-                'name': 'Bilateral',
+                'name': 'All cases',
                 'arm1': ['neg bilateral', 'Negative'],
                 'arm2': ['pos bilateral', 'Positive'],
                 'palette': ['bisque', 'darkorange'],
                 'paired': False
             }, {
-                'name': 'Positive',
-                'arm1': ['healthy', 'Healthy'],
+                'name': 'Positive cases',
+                'arm1': ['healthy', 'Contra'],
                 'arm2': ['affected', 'Affected'],
                 'palette': ['bisque', 'darkorange'],
                 'paired': True,
             }, {
-                'name': 'Negative',
+                'name': 'Negative cases',
                 'arm1': ['neg right', 'Right'],
                 'arm2': ['neg left', 'Left'],
                 'palette': ['bisque', 'bisque'],
@@ -793,19 +800,19 @@ class CLI(BaseMLCLI):
 
         max_recipe = [
             {
-                'name': 'Bilateral',
+                'name': 'All cases',
                 'arm1': ['neg bilateral max', 'Negative'],
                 'arm2': ['pos bilateral max', 'Positive'],
                 'palette': ['bisque', 'darkorange'],
                 'paired': False
             }, {
-                'name': 'Positive',
-                'arm1': ['healthy max', 'Healthy'],
+                'name': 'Positive cases',
+                'arm1': ['healthy max', 'Contra'],
                 'arm2': ['affected max', 'Affected'],
                 'palette': ['bisque', 'darkorange'],
                 'paired': True,
             }, {
-                'name': 'Negative',
+                'name': 'Negative cases',
                 'arm1': ['neg right max', 'Right'],
                 'arm2': ['neg left max', 'Left'],
                 'palette': ['bisque', 'bisque'],
@@ -817,7 +824,7 @@ class CLI(BaseMLCLI):
 
         sns.set_palette(sns.color_palette())
         fig, axes = plt.subplots(1, len(recipe), sharey=True, figsize=(len(recipe)*3, 6), dpi=300)
-        fig.suptitle(f'Comparison of {a.target} CAM Score on ROI')
+        fig.suptitle(f'CSoR {a.target}')
 
         for i, r in enumerate(recipe):
             df1 = select_col(r['arm1'][0], r['arm1'][1])
@@ -836,12 +843,12 @@ class CLI(BaseMLCLI):
                 width=.5,
                 capsize=.2,
                 errorbar=('ci', 95),
-                err_kws={"color": "gray", "linewidth": 1.0},
+                err_kws={'color': 'gray', 'linewidth': 1.0},
                 palette=r['palette'],
                 alpha=0.8,
                 ax=ax,
             )
-            ax.set(xlabel=r['name'])
+            ax.set(xlabel=r['name'], ylabel=f'CSoR {a.target}')
 
             asterisk_tuples = [
                 (0, 1, significant(p)),
@@ -863,6 +870,7 @@ class CLI(BaseMLCLI):
         ax.set_ylim(ymin, ymax+margin)
 
         plt.subplots_adjust(bottom=0.15, left=0.2)
+        os.makedirs('out/fig3', exist_ok=True)
         plt.savefig(f'out/fig3/bars_{a.target}.png')
         if not a.noshow:
             plt.show()
@@ -917,25 +925,24 @@ class CLI(BaseMLCLI):
                 for xi, xv in enumerate(x):
                     v = mask[yi, xi]
                     c = np.array(cmap(normalize(v)))
+                    colors[yi, xi] = c
                     if left_hroi[0] < xi < left_hroi[2] and left_hroi[1] < yi < left_hroi[3]:
-                        colors[yi, xi] = c
                         continue
                     if right_hroi[0] < xi < right_hroi[2] and right_hroi[1] < yi < right_hroi[3]:
-                        colors[yi, xi] = c
                         continue
                     # c = np.clip(c - np.array([.5]*3 + [.0]), 0.0, 1.0)
-                    # colors[yi, xi] = c
                     # c[-1] = 0.8
                     colors[yi, xi] = np.array([.4, .4, .4, 0.1])
-            # print(colors.shape)
+                    # colors[yi, xi] = c
+
             surf = ax.plot_surface(Y, X, mask,
                                    linewidth=0.5,
                                    facecolors=colors,
                                    shade=False,
                                    cmap='jet')
         else:
-            # surf = ax.plot_surface(Y, X, mask, linewidth=0.5, cmap='jet', antialiased=False)
-            surf = ax.plot_wireframe(Y, X, mask, linewidth=0.5, cmap='jet', antialiased=False)
+            surf = ax.plot_surface(Y, X, mask, linewidth=0.01, cmap='jet', antialiased=False, edgecolors=np.array([.1, .1, .1, 0.1]))
+            # surf = ax.plot_wireframe(Y, X, mask, linewidth=0.5, cmap='jet', antialiased=False)
         fig.colorbar(surf, shrink=0.5, aspect=10)
         ax.view_init(elev=30, azim=30)
 
@@ -996,9 +1003,6 @@ class CLI(BaseMLCLI):
         ax.set_zlabel('Z')
 
         plt.show()
-
-
-
 
 
 if __name__ == '__main__':
