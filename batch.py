@@ -38,7 +38,7 @@ sns.set_palette('tab10')
 # sns.set_palette(brightened_palette)
 
 # plt.rcParams['font.family'] = 'Times New Roman'
-# plt.rcParams['font.family'] = 'Arial'
+plt.rcParams['font.family'] = 'Arial'
 # plt.rcParams["font.size"] = 15 # 全体のフォントサイズが変更されます。
 
 # plt.rcParams['xtick.direction'] = 'in' #x軸の目盛りの向き
@@ -402,6 +402,7 @@ class CLI(BaseMLCLI):
                 alpha=0.8,
                 ax=ax,
             )
+            ax.set_ylabel('Importance')
 
             __, p_value = stats.ttest_rel(left_values, right_values)
 
