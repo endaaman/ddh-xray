@@ -21,7 +21,7 @@ from scipy import stats
 import numpy as np
 from pydantic import Field
 import lightgbm as lgb
-from sklearn.svm import SVR
+from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier
 
 from endaaman import with_wrote
@@ -317,12 +317,7 @@ class CLI(BaseMLCLI):
     def train_gbm(self, df, seed):
         data = []
         ii = []
-        M = {
-            'auc': [],
-            'acc': [],
-            'prec': [],
-            'f1': [],
-        }
+        M = []
         for fold in [1,2,3,4,5,6]:
             df_train = df[df['fold'] != fold]
             df_valid = df[df['fold'] == fold]
@@ -366,10 +361,13 @@ class CLI(BaseMLCLI):
             fpr, tpr, thresholds = skmetrics.roc_curve(gt, pred)
             youden_index = np.argmax(tpr - fpr)
             pred = pred > thresholds[youden_index]
-            M['auc'].append(skmetrics.auc(fpr, tpr))
-            M['acc'].append(skmetrics.accuracy_score(gt, pred))
-            M['prec'].append(skmetrics.precision_score(gt, pred))
-            M['f1'].append(skmetrics.f1_score(gt, pred))
+
+            M.append({
+                'auc': skmetrics.auc(fpr, tpr),
+                'acc': skmetrics.accuracy_score(gt, pred),
+                'prec': skmetrics.precision_score(gt, pred),
+                'f1': skmetrics.f1_score(gt, pred),
+            })
 
             # acc = [skmetrics.accuracy_score(y_valid, pred_valid>t) for t in thresholds]
             # f1 = 2 * (acc * tpr) / (acc + tpr)
@@ -393,12 +391,7 @@ class CLI(BaseMLCLI):
 
 
     def train_svm(self, df, seed):
-        M = {
-            'auc': [],
-            'acc': [],
-            'prec': [],
-            'f1': [],
-        }
+        M = []
         for fold in [1,2,3,4,5,6]:
             df_train = df[df['fold'] != fold]
             df_valid = df[df['fold'] == fold]
@@ -412,38 +405,36 @@ class CLI(BaseMLCLI):
             best_score = 0
             best_parameters = {}
             best_model = None
-            for gamma in tqdm(param_list):
-                t = tqdm(param_list, leave=False)
+            for gamma in param_list:
                 for C in param_list:
                     # model = SVC(kernel=self.svm_kernel, gamma=gamma, C=C, random_state=None)
-                    model = SVR(kernel='rbf', gamma=gamma, C=C)
+                    model = SVC(kernel='rbf', gamma=gamma, C=C, probability=True)
                     model.fit(x_train, y_train)
                     score = model.score(x_valid, y_valid)
-                    t.set_description(f'score: {score:.3f} best: {best_score:.3f}')
-                    t.refresh()
                     if score > best_score:
                         best_score = score
                         best_parameters = {'gamma' : gamma, 'C' : C}
                         best_model = model
             model = best_model
 
-            pred_valid = model.predict(x_valid)
+            pred_valid = model.predict_proba(x_valid)[:, 1]
             gt, pred = y_valid, pred_valid
 
             fpr, tpr, thresholds = skmetrics.roc_curve(gt, pred)
             youden_index = np.argmax(tpr - fpr)
             pred = pred > thresholds[youden_index]
-            M['auc'].append(skmetrics.auc(fpr, tpr))
-            M['acc'].append(skmetrics.accuracy_score(gt, pred))
-            M['prec'].append(skmetrics.precision_score(gt, pred))
-            M['f1'].append(skmetrics.f1_score(gt, pred))
-
-            print('fold', fold, best_parameters, M['auc'][-1])
+            M.append({
+                'auc': skmetrics.auc(fpr, tpr),
+                'acc': skmetrics.accuracy_score(gt, pred),
+                'prec': skmetrics.precision_score(gt, pred),
+                'f1': skmetrics.f1_score(gt, pred),
+            })
 
         return pd.DataFrame(M)
 
-    def train_rf(self, df):
+    def train_rf(self, df, seed):
 
+        M = []
         for fold in [1,2,3,4,5,6]:
             df_train = df[df['fold'] != fold]
             df_valid = df[df['fold'] == fold]
@@ -454,20 +445,38 @@ class CLI(BaseMLCLI):
             y_valid = df_valid[col_target]
 
             clf = RandomForestClassifier(random_state=0)
-            clf = clf.fit(train_X, train_y)
-            pred = clf.predict(test_X)
-            fpr, tpr, thresholds = roc_curve(test_y, pred, pos_label=1)
-            auc(fpr, tpr)
-            accuracy_score(pred, test_y)
+            clf = clf.fit(x_train, y_train)
+            pred_valid = clf.predict_proba(x_valid)[:, 1]
+            gt, pred = y_valid, pred_valid
 
+            fpr, tpr, thresholds = skmetrics.roc_curve(gt, pred)
+            youden_index = np.argmax(tpr - fpr)
+            pred = pred > thresholds[youden_index]
+            M.append({
+                'auc': skmetrics.auc(fpr, tpr),
+                'acc': skmetrics.accuracy_score(gt, pred),
+                'prec': skmetrics.precision_score(gt, pred),
+                'f1': skmetrics.f1_score(gt, pred),
+            })
+
+        return pd.DataFrame(M)
 
 
     def run_tabular(self, a):
         dfs = load_data(0, True, a.seed)
         df = dfs['all']
-        # M_gbm, importance = self.train_gbm(df, a.seed)
+
+        M_gbm, importance = self.train_gbm(df, a.seed)
+        print('GBM')
+        print(M_gbm)
+
         M_svm  = self.train_svm(df, a.seed)
+        print('SVM')
         print(M_svm)
+
+        M_rf  = self.train_rf(df, a.seed)
+        print('RF')
+        print(M_rf)
 
     class GbmCurveByFoldsArgs(CommonArgs):
         curve: str = Field(..., regex=r'^roc|pr$')
