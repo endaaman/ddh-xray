@@ -21,11 +21,11 @@ from scipy import stats
 import numpy as np
 from pydantic import Field
 
+import shap
 import lightgbm as lgb
 from sklearn.svm import SVC
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
-from pytorch_tabnet.tab_model import TabNetClassifier, TabNetRegressor
 
 from endaaman import with_wrote
 from endaaman.ml import BaseMLCLI, roc_auc_ci
@@ -316,9 +316,12 @@ class CLI(BaseMLCLI):
         df.to_excel('data/table2.xlsx')
 
     def train_gbm(self, df, seed):
+        shap.initjs()
+
         data = []
         ii = []
         M = []
+        df = df.join(pd.read_excel('data/tables/side.xlsx', index_col=0))
         for fold in [1,2,3,4,5,6]:
             df_train = df[df['fold'] != fold]
             df_valid = df[df['fold'] == fold]
@@ -327,6 +330,7 @@ class CLI(BaseMLCLI):
             y_train = df_train[col_target]
             x_valid = df_valid[cols_measure]
             y_valid = df_valid[col_target]
+            side_valid = df_valid['side']
 
             train_set = lgb.Dataset(x_train, label=y_train, categorical_feature=[])
             # valid_sets = [train_set]
@@ -386,6 +390,23 @@ class CLI(BaseMLCLI):
             i = model.feature_importance(importance_type='gain')
             # i = pd.DataFrame(data=i, index=cols_measure)
             ii.append(i)
+
+            explainer = shap.TreeExplainer(model=model)
+            x_valid_shap = x_valid.reset_index(drop=True)
+            shap_values = explainer.shap_values(X=x_valid_shap)
+
+            shap_left = shap_values[side_valid == 'left']
+            shap_right = shap_values[side_valid == 'right']
+
+            # shap.summary_plot(shap_values, x_valid_shap)
+            shap.summary_plot(shap_left, x_valid_shap)
+            shap.summary_plot(shap_right, x_valid_shap)
+            # shap.summary_plot(shap_values, x_valid_shap, plot_type='bar')
+            print(y_valid)
+            print(side_valid)
+            print(shap_values)
+            plt.show()
+            return
 
         data = pd.DataFrame(data)
         M = pd.DataFrame(M)
@@ -503,15 +524,15 @@ class CLI(BaseMLCLI):
         df = dfs['all']
 
         M_gbm, importance = self.train_gbm(df, a.seed)
-        M_svm = self.train_svm(df, a.seed)
-        M_rf = self.train_rf(df, a.seed)
-        M_linear = self.train_linear(df, a.seed)
+        # M_svm = self.train_svm(df, a.seed)
+        # M_rf = self.train_rf(df, a.seed)
+        # M_linear = self.train_linear(df, a.seed)
 
         with pd.ExcelWriter(with_wrote('data/result/metrics_b.xlsx')) as writer:
             M_gbm.to_excel(writer, sheet_name='LightGBM')
-            M_svm.to_excel(writer, sheet_name='SVM')
-            M_rf.to_excel(writer, sheet_name='RandomForest')
-            M_linear.to_excel(writer, sheet_name='Linear')
+            # M_svm.to_excel(writer, sheet_name='SVM')
+            # M_rf.to_excel(writer, sheet_name='RandomForest')
+            # M_linear.to_excel(writer, sheet_name='Linear')
 
 
 
