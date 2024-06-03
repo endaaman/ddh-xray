@@ -21,7 +21,10 @@ from scipy import stats
 import numpy as np
 from pydantic import Field
 import lightgbm as lgb
+from sklearn.svm import SVR
+from sklearn.ensemble import RandomForestClassifier
 
+from endaaman import with_wrote
 from endaaman.ml import BaseMLCLI, roc_auc_ci
 
 from datasets import read_label_as_df
@@ -175,15 +178,16 @@ class CLI(BaseMLCLI):
             i.save(f'{d}/{name}')
 
     class RocFoldsMeanArgs(CommonArgs):
-        noshow: bool = Field(False, cli=('--noshow', ))
-        model:str = 'resnet34'
-        basedir: str = 'out/classification_resnet'
+        noshow: bool = False
+        model:str = 'tf_efficientnet_b0'
+        basedir: str = 'out/classification_effnet_final'
+        plot: bool = False
 
     def run_roc_folds_mean(self, a):
         matplotlib.use('Agg')
-        arm1 = 'integrated'
-        arm2 = 'additional'
-        # arm2 = 'image'
+        arm1 = 'image'
+        arm2 = 'integrated'
+        # arm2 = 'additional'
         result = {
             arm1: [],
             arm2: [],
@@ -217,17 +221,54 @@ class CLI(BaseMLCLI):
         result['tvalue'] = tvalue
         result['pvalue'] = pvalue
 
-        plt.ylabel('Sensitivity')
-        plt.xlabel('1 - Specificity')
-        plt.legend(loc='lower right')
-        plt.savefig(f'data/result/roc_folds_mean_{a.model}.png')
         with open(f'data/result/roc_folds_mean_{a.model}.json', 'w', encoding='utf-8') as f:
             json.dump(result, f, indent=2)
 
-        print(result)
+        if a.plot:
+            plt.ylabel('Sensitivity')
+            plt.xlabel('1 - Specificity')
+            plt.legend(loc='lower right')
+            plt.savefig(f'data/result/roc_folds_mean_{a.model}.png')
+            plt.show()
 
-        # if not a.noshow:
-        #     plt.show()
+
+    def run_all_metrics(self, a):
+        modes = ['image', 'integrated']
+        depths = ['b0', 'b4', 'b8']
+        R = {}
+
+        with pd.ExcelWriter('data/result/all_metrics.xlsx') as writer:
+            for mode in modes:
+                R[mode] = {}
+                for d in depths:
+                    M = {
+                        'auc': [],
+                        'acc': [],
+                        'prec': [],
+                        'f1': [],
+                    }
+                    for fold in [1, 2, 3, 4, 5, 6]:
+                        # dir = f'out/classification_effnet_final/image/tf_efficientnet_b0_fold1/predictions.pt'
+                        pred_file = f'out/classification_effnet_final/{mode}/tf_efficientnet_{d}_fold{fold}/predictions.pt'
+                        P = torch.load(pred_file)
+                        pred = P['val_preds'].cpu().flatten().numpy()
+                        gt = P['val_gts'].cpu().flatten().numpy()
+
+                        fpr, tpr, thresholds = skmetrics.roc_curve(gt, pred)
+                        youden_index = np.argmax(tpr - fpr)
+                        pred = pred > thresholds[youden_index]
+                        M['auc'].append(skmetrics.auc(fpr, tpr))
+                        M['acc'].append(skmetrics.accuracy_score(gt, pred))
+                        M['prec'].append(skmetrics.precision_score(gt, pred))
+                        M['f1'].append(skmetrics.f1_score(gt, pred))
+                        print(mode, d, fold, M)
+
+                    R[mode][d] = M
+                    df = pd.DataFrame(M)
+                    df.to_excel(writer, sheet_name=f'{mode}_{d}')
+
+        # with open(with_wrote(f'data/result/all_metrics.json'), 'w', encoding='utf-8') as f:
+        #     json.dump(R, f, indent=2)
 
     def run_p_value(self, a):
         with open('data/result/roc_folds_mean_all.json', mode='r') as f:
@@ -276,7 +317,13 @@ class CLI(BaseMLCLI):
     def train_gbm(self, df, seed):
         data = []
         ii = []
-        for fold in range(1,7):
+        M = {
+            'auc': [],
+            'acc': [],
+            'prec': [],
+            'f1': [],
+        }
+        for fold in [1,2,3,4,5,6]:
             df_train = df[df['fold'] != fold]
             df_valid = df[df['fold'] == fold]
 
@@ -314,27 +361,113 @@ class CLI(BaseMLCLI):
             )
 
             pred_valid = model.predict(x_valid, num_iteration=model.best_iteration)
+            gt, pred = y_valid, pred_valid
 
-            fpr, tpr, thresholds = skmetrics.roc_curve(y_valid, pred_valid)
-            acc = [skmetrics.accuracy_score(y_valid, pred_valid>t) for t in thresholds]
-            f1 = 2 * (acc * tpr) / (acc + tpr)
-            precision, recall, __ = skmetrics.precision_recall_curve(y_valid, pred_valid)
-            data.append({
-                'fpr': fpr,
-                'tpr': tpr,
-                'acc': acc,
-                'f1': f1,
-                'precision': precision,
-                'recall': recall,
-            })
+            fpr, tpr, thresholds = skmetrics.roc_curve(gt, pred)
+            youden_index = np.argmax(tpr - fpr)
+            pred = pred > thresholds[youden_index]
+            M['auc'].append(skmetrics.auc(fpr, tpr))
+            M['acc'].append(skmetrics.accuracy_score(gt, pred))
+            M['prec'].append(skmetrics.precision_score(gt, pred))
+            M['f1'].append(skmetrics.f1_score(gt, pred))
+
+            # acc = [skmetrics.accuracy_score(y_valid, pred_valid>t) for t in thresholds]
+            # f1 = 2 * (acc * tpr) / (acc + tpr)
+            # precision, recall, __ = skmetrics.precision_recall_curve(y_valid, pred_valid)
+            # data.append({
+            #     'fpr': fpr,
+            #     'tpr': tpr,
+            #     'acc': acc,
+            #     'f1': f1,
+            #     'precision': precision,
+            #     'recall': recall,
+            # })
             i = model.feature_importance(importance_type='gain')
             # i = pd.DataFrame(data=i, index=cols_measure)
             ii.append(i)
 
         data = pd.DataFrame(data)
-        ii = np.array(ii)
-        ii = pd.DataFrame(data=ii, columns=cols_measure, index=[f'fold{f}' for f in range(1,7)])
-        return data, ii
+        M = pd.DataFrame(M)
+        ii = pd.DataFrame(data=np.array(ii), columns=cols_measure, index=[f'fold{f}' for f in range(1,7)])
+        return M, ii
+
+
+    def train_svm(self, df, seed):
+        M = {
+            'auc': [],
+            'acc': [],
+            'prec': [],
+            'f1': [],
+        }
+        for fold in [1,2,3,4,5,6]:
+            df_train = df[df['fold'] != fold]
+            df_valid = df[df['fold'] == fold]
+
+            x_train = df_train[cols_measure]
+            y_train = df_train[col_target]
+            x_valid = df_valid[cols_measure]
+            y_valid = df_valid[col_target]
+
+            param_list = [0.001, 0.01, 0.1, 1, 10]
+            best_score = 0
+            best_parameters = {}
+            best_model = None
+            for gamma in tqdm(param_list):
+                t = tqdm(param_list, leave=False)
+                for C in param_list:
+                    # model = SVC(kernel=self.svm_kernel, gamma=gamma, C=C, random_state=None)
+                    model = SVR(kernel='rbf', gamma=gamma, C=C)
+                    model.fit(x_train, y_train)
+                    score = model.score(x_valid, y_valid)
+                    t.set_description(f'score: {score:.3f} best: {best_score:.3f}')
+                    t.refresh()
+                    if score > best_score:
+                        best_score = score
+                        best_parameters = {'gamma' : gamma, 'C' : C}
+                        best_model = model
+            model = best_model
+
+            pred_valid = model.predict(x_valid)
+            gt, pred = y_valid, pred_valid
+
+            fpr, tpr, thresholds = skmetrics.roc_curve(gt, pred)
+            youden_index = np.argmax(tpr - fpr)
+            pred = pred > thresholds[youden_index]
+            M['auc'].append(skmetrics.auc(fpr, tpr))
+            M['acc'].append(skmetrics.accuracy_score(gt, pred))
+            M['prec'].append(skmetrics.precision_score(gt, pred))
+            M['f1'].append(skmetrics.f1_score(gt, pred))
+
+            print('fold', fold, best_parameters, M['auc'][-1])
+
+        return pd.DataFrame(M)
+
+    def train_rf(self, df):
+
+        for fold in [1,2,3,4,5,6]:
+            df_train = df[df['fold'] != fold]
+            df_valid = df[df['fold'] == fold]
+
+            x_train = df_train[cols_measure]
+            y_train = df_train[col_target]
+            x_valid = df_valid[cols_measure]
+            y_valid = df_valid[col_target]
+
+            clf = RandomForestClassifier(random_state=0)
+            clf = clf.fit(train_X, train_y)
+            pred = clf.predict(test_X)
+            fpr, tpr, thresholds = roc_curve(test_y, pred, pos_label=1)
+            auc(fpr, tpr)
+            accuracy_score(pred, test_y)
+
+
+
+    def run_tabular(self, a):
+        dfs = load_data(0, True, a.seed)
+        df = dfs['all']
+        # M_gbm, importance = self.train_gbm(df, a.seed)
+        M_svm  = self.train_svm(df, a.seed)
+        print(M_svm)
 
     class GbmCurveByFoldsArgs(CommonArgs):
         curve: str = Field(..., regex=r'^roc|pr$')
