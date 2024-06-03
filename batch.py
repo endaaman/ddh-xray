@@ -321,7 +321,13 @@ class CLI(BaseMLCLI):
         data = []
         ii = []
         M = []
-        df = df.join(pd.read_excel('data/tables/side.xlsx', index_col=0))
+        s = pd.read_excel('data/tables/side.xlsx', index_col=0)[['side']]
+        s.index = s.index.astype(str).str.zfill(4)
+        df = df.join(s)
+
+        left_valuess = {'values': [], 'shap': []}
+        right_valuess = {'values': [], 'shap': []}
+        all_valuess = {'values': [], 'shap': []}
         for fold in [1,2,3,4,5,6]:
             df_train = df[df['fold'] != fold]
             df_valid = df[df['fold'] == fold]
@@ -330,6 +336,7 @@ class CLI(BaseMLCLI):
             y_train = df_train[col_target]
             x_valid = df_valid[cols_measure]
             y_valid = df_valid[col_target]
+            side_train = df_train['side']
             side_valid = df_valid['side']
 
             train_set = lgb.Dataset(x_train, label=y_train, categorical_feature=[])
@@ -392,21 +399,48 @@ class CLI(BaseMLCLI):
             ii.append(i)
 
             explainer = shap.TreeExplainer(model=model)
-            x_valid_shap = x_valid.reset_index(drop=True)
-            shap_values = explainer.shap_values(X=x_valid_shap)
 
-            shap_left = shap_values[side_valid == 'left']
-            shap_right = shap_values[side_valid == 'right']
+            # x_valid_shap = x_valid.reset_index(drop=True)
+            # shap_values = explainer.shap_values(X=x_valid_shap)
 
-            # shap.summary_plot(shap_values, x_valid_shap)
-            shap.summary_plot(shap_left, x_valid_shap)
-            shap.summary_plot(shap_right, x_valid_shap)
-            # shap.summary_plot(shap_values, x_valid_shap, plot_type='bar')
-            print(y_valid)
-            print(side_valid)
-            print(shap_values)
-            plt.show()
-            return
+            right_values = x_valid[side_valid == 'right'].reset_index(drop=True)
+            right_shap = explainer.shap_values(X=right_values)
+            right_valuess['values'].append(right_values)
+            right_valuess['shap'].append(right_shap)
+
+            left_values = x_valid[side_valid == 'left'].reset_index(drop=True)
+            left_shap = explainer.shap_values(X=left_values)
+            left_valuess['values'].append(left_values)
+            left_valuess['shap'].append(left_shap)
+
+            all_values = x_valid.reset_index(drop=True)
+            all_shap = explainer.shap_values(X=all_values)
+            all_valuess['values'].append(all_values)
+            all_valuess['shap'].append(all_shap)
+
+            # shap.summary_plot(right_shap, right_values)
+            # plt.show()
+
+        shap.summary_plot(
+                np.concatenate(right_valuess['shap']),
+                pd.concat(right_valuess['values']),
+                show=False)
+        plt.savefig('right.png')
+        plt.clf()
+
+        shap.summary_plot(
+                np.concatenate(left_valuess['shap']),
+                pd.concat(left_valuess['values']),
+                show=False)
+        plt.savefig('left.png')
+        plt.clf()
+
+        shap.summary_plot(
+                np.concatenate(all_valuess['shap']),
+                pd.concat(all_valuess['values']),
+                show=False)
+        plt.savefig('all.png')
+        plt.clf()
 
         data = pd.DataFrame(data)
         M = pd.DataFrame(M)
