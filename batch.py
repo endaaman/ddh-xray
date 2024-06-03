@@ -20,9 +20,12 @@ from sklearn import metrics as skmetrics
 from scipy import stats
 import numpy as np
 from pydantic import Field
+
 import lightgbm as lgb
 from sklearn.svm import SVC
+from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
+from pytorch_tabnet.tab_model import TabNetClassifier, TabNetRegressor
 
 from endaaman import with_wrote
 from endaaman.ml import BaseMLCLI, roc_auc_ci
@@ -232,21 +235,16 @@ class CLI(BaseMLCLI):
             plt.show()
 
 
-    def run_all_metrics(self, a):
+    def run_cnn_metrics(self, a):
         modes = ['image', 'integrated']
         depths = ['b0', 'b4', 'b8']
         R = {}
 
-        with pd.ExcelWriter('data/result/all_metrics.xlsx') as writer:
+        with pd.ExcelWriter('data/result/metrics_ac.xlsx') as writer:
             for mode in modes:
                 R[mode] = {}
                 for d in depths:
-                    M = {
-                        'auc': [],
-                        'acc': [],
-                        'prec': [],
-                        'f1': [],
-                    }
+                    M = []
                     for fold in [1, 2, 3, 4, 5, 6]:
                         # dir = f'out/classification_effnet_final/image/tf_efficientnet_b0_fold1/predictions.pt'
                         pred_file = f'out/classification_effnet_final/{mode}/tf_efficientnet_{d}_fold{fold}/predictions.pt'
@@ -255,13 +253,16 @@ class CLI(BaseMLCLI):
                         gt = P['val_gts'].cpu().flatten().numpy()
 
                         fpr, tpr, thresholds = skmetrics.roc_curve(gt, pred)
+                        precision, recall, _ = skmetrics.precision_recall_curve(gt, pred)
                         youden_index = np.argmax(tpr - fpr)
                         pred = pred > thresholds[youden_index]
-                        M['auc'].append(skmetrics.auc(fpr, tpr))
-                        M['acc'].append(skmetrics.accuracy_score(gt, pred))
-                        M['prec'].append(skmetrics.precision_score(gt, pred))
-                        M['f1'].append(skmetrics.f1_score(gt, pred))
-                        print(mode, d, fold, M)
+                        M.append({
+                            'roc_auc': skmetrics.auc(fpr, tpr),
+                            'pr_auc': skmetrics.auc(recall, precision),
+                            'acc': skmetrics.accuracy_score(gt, pred),
+                            'prec': skmetrics.precision_score(gt, pred),
+                            'f1': skmetrics.f1_score(gt, pred),
+                        })
 
                     R[mode][d] = M
                     df = pd.DataFrame(M)
@@ -359,11 +360,13 @@ class CLI(BaseMLCLI):
             gt, pred = y_valid, pred_valid
 
             fpr, tpr, thresholds = skmetrics.roc_curve(gt, pred)
+            precision, recall, _ = skmetrics.precision_recall_curve(gt, pred)
             youden_index = np.argmax(tpr - fpr)
             pred = pred > thresholds[youden_index]
 
             M.append({
-                'auc': skmetrics.auc(fpr, tpr),
+                'roc_auc': skmetrics.auc(fpr, tpr),
+                'pr_auc': skmetrics.auc(recall, precision),
                 'acc': skmetrics.accuracy_score(gt, pred),
                 'prec': skmetrics.precision_score(gt, pred),
                 'f1': skmetrics.f1_score(gt, pred),
@@ -421,10 +424,12 @@ class CLI(BaseMLCLI):
             gt, pred = y_valid, pred_valid
 
             fpr, tpr, thresholds = skmetrics.roc_curve(gt, pred)
+            precision, recall, _ = skmetrics.precision_recall_curve(gt, pred)
             youden_index = np.argmax(tpr - fpr)
             pred = pred > thresholds[youden_index]
             M.append({
-                'auc': skmetrics.auc(fpr, tpr),
+                'roc_auc': skmetrics.auc(fpr, tpr),
+                'pr_auc': skmetrics.auc(recall, precision),
                 'acc': skmetrics.accuracy_score(gt, pred),
                 'prec': skmetrics.precision_score(gt, pred),
                 'f1': skmetrics.f1_score(gt, pred),
@@ -433,7 +438,6 @@ class CLI(BaseMLCLI):
         return pd.DataFrame(M)
 
     def train_rf(self, df, seed):
-
         M = []
         for fold in [1,2,3,4,5,6]:
             df_train = df[df['fold'] != fold]
@@ -450,10 +454,42 @@ class CLI(BaseMLCLI):
             gt, pred = y_valid, pred_valid
 
             fpr, tpr, thresholds = skmetrics.roc_curve(gt, pred)
+            precision, recall, _ = skmetrics.precision_recall_curve(gt, pred)
             youden_index = np.argmax(tpr - fpr)
             pred = pred > thresholds[youden_index]
             M.append({
-                'auc': skmetrics.auc(fpr, tpr),
+                'roc_auc': skmetrics.auc(fpr, tpr),
+                'pr_auc': skmetrics.auc(recall, precision),
+                'acc': skmetrics.accuracy_score(gt, pred),
+                'prec': skmetrics.precision_score(gt, pred),
+                'f1': skmetrics.f1_score(gt, pred),
+            })
+        return pd.DataFrame(M)
+
+
+    def train_linear(self, df, seed):
+        M = []
+        for fold in [1,2,3,4,5,6]:
+            df_train = df[df['fold'] != fold]
+            df_valid = df[df['fold'] == fold]
+
+            x_train = df_train[cols_measure]
+            y_train = df_train[col_target]
+            x_valid = df_valid[cols_measure]
+            y_valid = df_valid[col_target]
+
+            model = LogisticRegression()
+            model.fit(x_train, y_train)
+            pred_valid = model.predict_proba(x_valid)[:, 1]
+            gt, pred = y_valid, pred_valid
+
+            fpr, tpr, thresholds = skmetrics.roc_curve(gt, pred)
+            precision, recall, _ = skmetrics.precision_recall_curve(gt, pred)
+            youden_index = np.argmax(tpr - fpr)
+            pred = pred > thresholds[youden_index]
+            M.append({
+                'roc_auc': skmetrics.auc(fpr, tpr),
+                'pr_auc': skmetrics.auc(recall, precision),
                 'acc': skmetrics.accuracy_score(gt, pred),
                 'prec': skmetrics.precision_score(gt, pred),
                 'f1': skmetrics.f1_score(gt, pred),
@@ -462,21 +498,22 @@ class CLI(BaseMLCLI):
         return pd.DataFrame(M)
 
 
-    def run_tabular(self, a):
+    def run_tabular_metrics(self, a):
         dfs = load_data(0, True, a.seed)
         df = dfs['all']
 
         M_gbm, importance = self.train_gbm(df, a.seed)
-        print('GBM')
-        print(M_gbm)
+        M_svm = self.train_svm(df, a.seed)
+        M_rf = self.train_rf(df, a.seed)
+        M_linear = self.train_linear(df, a.seed)
 
-        M_svm  = self.train_svm(df, a.seed)
-        print('SVM')
-        print(M_svm)
+        with pd.ExcelWriter(with_wrote('data/result/metrics_b.xlsx')) as writer:
+            M_gbm.to_excel(writer, sheet_name='LightGBM')
+            M_svm.to_excel(writer, sheet_name='SVM')
+            M_rf.to_excel(writer, sheet_name='RandomForest')
+            M_linear.to_excel(writer, sheet_name='Linear')
 
-        M_rf  = self.train_rf(df, a.seed)
-        print('RF')
-        print(M_rf)
+
 
     class GbmCurveByFoldsArgs(CommonArgs):
         curve: str = Field(..., regex=r'^roc|pr$')
