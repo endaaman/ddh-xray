@@ -11,6 +11,7 @@ import pandas as pd
 import seaborn as sns
 import matplotlib
 from matplotlib import pyplot as plt, animation, colors as mcolors
+from matplotlib.lines import Line2D
 from matplotlib.ticker import MultipleLocator, FormatStrFormatter
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import matplotlib.cm as cm
@@ -24,7 +25,7 @@ from pydantic import Field
 import shap
 import lightgbm as lgb
 from sklearn.svm import SVC
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.tree import DecisionTreeClassifier, plot_tree
 
@@ -48,9 +49,9 @@ sns.set_palette('tab10')
 plt.rcParams['font.family'] = 'Arial'
 # plt.rcParams["font.size"] = 15 # 全体のフォントサイズが変更されます。
 
-# plt.rcParams['xtick.direction'] = 'in' #x軸の目盛りの向き
-# plt.rcParams["xtick.minor.visible"] = True  #x軸補助目盛りの追加
-# plt.rcParams['xtick.bottom'] = True  #x軸の上部目盛り
+plt.rcParams['xtick.direction'] = 'in' #x軸の目盛りの向き
+plt.rcParams["xtick.minor.visible"] = True  #x軸補助目盛りの追加
+plt.rcParams['xtick.bottom'] = True  #x軸の上部目盛り
 plt.rcParams['ytick.direction'] = 'in' #y軸の目盛りの向き
 plt.rcParams['ytick.minor.visible'] = True  #y軸補助目盛りの追加
 plt.rcParams['ytick.left'] = True  #y軸の右部目盛り
@@ -322,9 +323,6 @@ class CLI(BaseMLCLI):
         data = []
         ii = []
         M = []
-        s = pd.read_excel('data/tables/side.xlsx', index_col=0)[['side']]
-        s.index = s.index.astype(str).str.zfill(4)
-        df = df.join(s)
 
         left_valuess = {'values': [], 'shap': []}
         right_valuess = {'values': [], 'shap': []}
@@ -406,28 +404,28 @@ class CLI(BaseMLCLI):
             # shap_values = explainer.shap_values(X=x_valid_shap)
 
             right_values = x_valid.rename(columns={
-                'left_a': 'Contralateral A',
-                'right_a': 'Affected A',
-                'left_b': 'Contralateral B',
-                'right_b': 'Affected B',
-                'left_alpha': 'Contralateral α',
-                'right_alpha': 'Affected α',
-                'left_oe': 'Contralateral OE',
-                'right_oe': 'Affected OE',
+                'left_a': 'Yamamuro A (contra)',
+                'right_a': 'Yamamuro A (affected)',
+                'left_b': 'Yamamuro B (contra)',
+                'right_b': 'Yamamuro B (affected)',
+                'left_alpha': 'Acetabular index (contra)',
+                'right_alpha': 'Acetabular index (affected)',
+                'left_oe': 'O-edge angle (contra)',
+                'right_oe': 'O-edge angle (affected)',
             })[side_valid == 'right'].reset_index(drop=True)
             right_shap = explainer.shap_values(X=right_values)
             right_valuess['values'].append(right_values)
             right_valuess['shap'].append(right_shap)
 
             left_values = x_valid.rename(columns={
-                'left_a': 'Affected A',
-                'right_a': 'Contralateral A',
-                'left_b': 'Affected B',
-                'right_b': 'Contralateral B',
-                'left_alpha': 'Affected α',
-                'right_alpha': 'Contralateral α',
-                'left_oe': 'Affected OE',
-                'right_oe': 'Contralateral OE',
+                'left_a': 'Yamamuro A (affected)',
+                'right_a': 'Yamamuro A (contra)',
+                'left_b': 'Yamamuro B (affected)',
+                'right_b': 'Yamamuro B (contra)',
+                'left_alpha': 'Acetabular index (affected)',
+                'right_alpha': 'Acetabular index (contra)',
+                'left_oe': 'O-edge angle (affected)',
+                'right_oe': 'O-edge angle (contra)',
             })[side_valid == 'left'].reset_index(drop=True)
             left_shap = explainer.shap_values(X=left_values)
             left_valuess['values'].append(left_values)
@@ -439,11 +437,6 @@ class CLI(BaseMLCLI):
             all_shap = explainer.shap_values(X=all_values)
             all_valuess['values'].append(all_values)
             all_valuess['shap'].append(all_shap)
-
-            true_values = x_valid[side_valid.notna()].reset_index(drop=True)
-            true_shap = explainer.shap_values(X=true_values)
-            true_valuess['values'].append(true_values)
-            true_valuess['shap'].append(true_shap)
 
             # shap.summary_plot(right_shap, right_values)
             # plt.show()
@@ -463,17 +456,17 @@ class CLI(BaseMLCLI):
         plt.clf()
 
         shap.summary_plot(
+                np.concatenate(left_valuess['shap'] + right_valuess['shap']),
+                pd.concat(left_valuess['values'] + right_valuess['values']),
+                show=False)
+        plt.savefig('out/shap/merged.png')
+        plt.clf()
+
+        shap.summary_plot(
                 np.concatenate(all_valuess['shap']),
                 pd.concat(all_valuess['values']),
                 show=False)
         plt.savefig('out/shap/all.png')
-        plt.clf()
-
-        shap.summary_plot(
-                np.concatenate(true_valuess['shap']),
-                pd.concat(true_valuess['values']),
-                show=False)
-        plt.savefig('out/shap/true.png')
         plt.clf()
 
         data = pd.DataFrame(data)
@@ -481,6 +474,7 @@ class CLI(BaseMLCLI):
         ii = pd.DataFrame(data=np.array(ii), columns=cols_measure, index=[f'fold{f}' for f in range(1,7)])
         return M, ii
 
+        plt.savefig('out/shap/all.png')
 
     def train_svm(self, df, seed):
         M = []
@@ -635,6 +629,97 @@ class CLI(BaseMLCLI):
             M_svm.to_excel(writer, sheet_name='SVM')
             M_rf.to_excel(writer, sheet_name='RandomForest')
             M_linear.to_excel(writer, sheet_name='Linear')
+
+    def run_plot_by_yamamuro_a(self, a):
+        dfs = load_data(0, True, a.seed)
+        df = dfs['all']
+        df = df[df['side'].notna()]
+        colors = {'left': 'royalblue', 'right': 'crimson', 'healthy': 'gray'}
+
+        def affected_side(row):
+            if row['side'] == 'left':
+                return row['left_a']
+            elif row['side'] == 'right':
+                return row['right_a']
+            else:
+                return None
+
+        def contra_side(row):
+            if row['side'] == 'left':
+                return row['right_a']
+            elif row['side'] == 'right':
+                return row['left_a']
+            else:
+                return None
+        df.loc[:, 'affected_a'] = df.apply(affected_side, axis=1)
+        df.loc[:, 'contra_a'] = df.apply(contra_side, axis=1)
+
+        model = LinearRegression()
+        model.fit(df['contra_a'].values[:, None], df['affected_a'].values)
+        coefficient = model.coef_[0]
+        intercept = model.intercept_
+
+        # x_pred = np.linspace(df['contra_a'].min(), df['contra_a'].max(), 100)[:, None]
+        # y_pred = model.predict(x_pred)
+
+        y_pred = model.predict(df['contra_a'].values[:, None])
+        r2 = skmetrics.r2_score(df['affected_a'].values, y_pred)
+
+        fig, ax = plt.subplots(figsize=(6, 6))
+        for category, group in df.groupby('side'):
+            ax.scatter(group['contra_a'], group['affected_a'], label=category, color=colors[category])
+        plt.plot(df['contra_a'].values, y_pred, color='black', label=f'Regression line: y = {coefficient:.2f}x + {intercept:.2f}')
+        ax.set_xlabel('Contra A')
+        ax.set_ylabel('Affected A')
+        ax.legend()
+        plt.title(f'Yamamuro A. R-squared: {r2:.2f}')
+        plt.show()
+
+    def run_boxplot(self, a):
+        dfs = load_data(0, True, a.seed)
+        df = dfs['all']
+        colors = {'left': 'royalblue', 'right': 'crimson', 'healthy': 'gray'}
+        df['side'] = df['side'].fillna('healthy')
+        data = df[cols_measure].rename(columns=col_to_label)
+        scatter_matrix = pd.plotting.scatter_matrix(data, c=df['side'].map(colors), figsize=(12, 12))
+
+        legend_elements = [Line2D([0], [0], marker='o', color='w', label=category, markerfacecolor=color, markersize=8)
+                           for category, color in colors.items()]
+        scatter_matrix[-1, -1].legend(handles=legend_elements, loc='upper left', bbox_to_anchor=(1.1, 0.9))
+        plt.tight_layout()
+        plt.show()
+
+    def run_violin(self, a):
+        dfs = load_data(0, True, a.seed)
+        df = dfs['all']
+        colors = {'left': 'royalblue', 'right': 'crimson', 'healthy': 'gray'}
+        df['side'] = df['side'].fillna('healthy')
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
+        sns.violinplot(x='side', y='left_a', data=df, ax=ax1)
+        sns.violinplot(x='side', y='left_b', data=df, ax=ax2)
+        ax1.set_ylabel('Left Yamamuro A')
+        ax1.set_xticklabels(['Health', 'Left', 'Right'])
+        ax2.set_ylabel('Right Yamamuro A')
+        ax2.set_ylabel('Right Yamamuro A')
+        ax2.set_xticklabels(['Health', 'Left', 'Right'])
+        plt.show()
+
+    def run_plot_by_affected_contra(self, a):
+        dfs = load_data(0, True, a.seed)
+        df = dfs['all']
+        df['side'] = df['side'].fillna('')
+
+        colors = {'left': 'red', 'right': 'blue', '': 'gray'}
+
+        fig, ax = plt.subplots(figsize=(6, 6))
+        for category, group in df.groupby('side'):
+            ax.scatter(group['left_a'], group['right_a'], label=category, color=colors[category])
+
+        ax.set_xlabel('Left Yamamuro A')
+        ax.set_ylabel('Right Yamamuro A')
+        ax.legend()
+        plt.show()
 
 
     class GbmCurveByFoldsArgs(CommonArgs):
