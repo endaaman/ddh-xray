@@ -359,7 +359,7 @@ class CLI(BaseMLCLI):
                     'zero_as_missing': True,
                 },
                 train_set=train_set,
-                num_boost_round=10000,
+                num_boost_round=100,
                 valid_sets=valid_sets,
                 # early_stopping_rounds=150,
                 callbacks=[
@@ -404,24 +404,43 @@ class CLI(BaseMLCLI):
 
             # x_valid_shap = x_valid.reset_index(drop=True)
             # shap_values = explainer.shap_values(X=x_valid_shap)
-            x_valid = x_valid.rename(columns=col_to_label)
 
-            right_values = x_valid[side_valid == 'right'].reset_index(drop=True)
+            right_values = x_valid.rename(columns={
+                'left_a': 'Contralateral A',
+                'right_a': 'Affected A',
+                'left_b': 'Contralateral B',
+                'right_b': 'Affected B',
+                'left_alpha': 'Contralateral α',
+                'right_alpha': 'Affected α',
+                'left_oe': 'Contralateral OE',
+                'right_oe': 'Affected OE',
+            })[side_valid == 'right'].reset_index(drop=True)
             right_shap = explainer.shap_values(X=right_values)
             right_valuess['values'].append(right_values)
             right_valuess['shap'].append(right_shap)
 
-            left_values = x_valid[side_valid == 'left'].reset_index(drop=True)
+            left_values = x_valid.rename(columns={
+                'left_a': 'Affected A',
+                'right_a': 'Contralateral A',
+                'left_b': 'Affected B',
+                'right_b': 'Contralateral B',
+                'left_alpha': 'Affected α',
+                'right_alpha': 'Contralateral α',
+                'left_oe': 'Affected OE',
+                'right_oe': 'Contralateral OE',
+            })[side_valid == 'left'].reset_index(drop=True)
             left_shap = explainer.shap_values(X=left_values)
             left_valuess['values'].append(left_values)
             left_valuess['shap'].append(left_shap)
+
+            x_valid = x_valid.rename(columns=col_to_label)
 
             all_values = x_valid.reset_index(drop=True)
             all_shap = explainer.shap_values(X=all_values)
             all_valuess['values'].append(all_values)
             all_valuess['shap'].append(all_shap)
 
-            true_values = x_valid.reset_index(drop=True)
+            true_values = x_valid[side_valid.notna()].reset_index(drop=True)
             true_shap = explainer.shap_values(X=true_values)
             true_valuess['values'].append(true_values)
             true_valuess['shap'].append(true_shap)
