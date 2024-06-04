@@ -26,12 +26,13 @@ import lightgbm as lgb
 from sklearn.svm import SVC
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.tree import DecisionTreeClassifier, plot_tree
 
 from endaaman import with_wrote
 from endaaman.ml import BaseMLCLI, roc_auc_ci
 
 from datasets import read_label_as_df
-from common import col_target, cols_feature, cols_measure, load_data
+from common import col_target, cols_feature, cols_measure, load_data, col_to_label
 
 
 # matplotlib.use('TkAgg')
@@ -327,6 +328,7 @@ class CLI(BaseMLCLI):
 
         left_valuess = {'values': [], 'shap': []}
         right_valuess = {'values': [], 'shap': []}
+        true_valuess = {'values': [], 'shap': []}
         all_valuess = {'values': [], 'shap': []}
         for fold in [1,2,3,4,5,6]:
             df_train = df[df['fold'] != fold]
@@ -402,6 +404,7 @@ class CLI(BaseMLCLI):
 
             # x_valid_shap = x_valid.reset_index(drop=True)
             # shap_values = explainer.shap_values(X=x_valid_shap)
+            x_valid = x_valid.rename(columns=col_to_label)
 
             right_values = x_valid[side_valid == 'right'].reset_index(drop=True)
             right_shap = explainer.shap_values(X=right_values)
@@ -418,6 +421,11 @@ class CLI(BaseMLCLI):
             all_valuess['values'].append(all_values)
             all_valuess['shap'].append(all_shap)
 
+            true_values = x_valid.reset_index(drop=True)
+            true_shap = explainer.shap_values(X=true_values)
+            true_valuess['values'].append(true_values)
+            true_valuess['shap'].append(true_shap)
+
             # shap.summary_plot(right_shap, right_values)
             # plt.show()
 
@@ -425,21 +433,28 @@ class CLI(BaseMLCLI):
                 np.concatenate(right_valuess['shap']),
                 pd.concat(right_valuess['values']),
                 show=False)
-        plt.savefig('right.png')
+        plt.savefig('out/shap/right.png')
         plt.clf()
 
         shap.summary_plot(
                 np.concatenate(left_valuess['shap']),
                 pd.concat(left_valuess['values']),
                 show=False)
-        plt.savefig('left.png')
+        plt.savefig('out/shap/left.png')
         plt.clf()
 
         shap.summary_plot(
                 np.concatenate(all_valuess['shap']),
                 pd.concat(all_valuess['values']),
                 show=False)
-        plt.savefig('all.png')
+        plt.savefig('out/shap/all.png')
+        plt.clf()
+
+        shap.summary_plot(
+                np.concatenate(true_valuess['shap']),
+                pd.concat(true_valuess['values']),
+                show=False)
+        plt.savefig('out/shap/true.png')
         plt.clf()
 
         data = pd.DataFrame(data)
@@ -521,6 +536,39 @@ class CLI(BaseMLCLI):
             })
         return pd.DataFrame(M)
 
+    def train_dt(self, df, seed):
+        M = []
+        for fold in [1,2,3,4,5,6]:
+            df_train = df[df['fold'] != fold]
+            df_valid = df[df['fold'] == fold]
+
+            x_train = df_train[cols_measure]
+            y_train = df_train[col_target]
+            x_valid = df_valid[cols_measure]
+            y_valid = df_valid[col_target]
+
+            clf = DecisionTreeClassifier()
+            clf = clf.fit(x_train, y_train)
+            pred_valid = clf.predict_proba(x_valid)[:, 1]
+            gt, pred = y_valid, pred_valid
+
+            fpr, tpr, thresholds = skmetrics.roc_curve(gt, pred)
+            precision, recall, _ = skmetrics.precision_recall_curve(gt, pred)
+            youden_index = np.argmax(tpr - fpr)
+            pred = pred > thresholds[youden_index]
+            M.append({
+                'roc_auc': skmetrics.auc(fpr, tpr),
+                'pr_auc': skmetrics.auc(recall, precision),
+                'acc': skmetrics.accuracy_score(gt, pred),
+                'prec': skmetrics.precision_score(gt, pred),
+                'f1': skmetrics.f1_score(gt, pred),
+            })
+
+        plot_tree(clf)
+        plt.show()
+        plt.clf()
+        return pd.DataFrame(M)
+
 
     def train_linear(self, df, seed):
         M = []
@@ -558,16 +606,16 @@ class CLI(BaseMLCLI):
         df = dfs['all']
 
         M_gbm, importance = self.train_gbm(df, a.seed)
-        # M_svm = self.train_svm(df, a.seed)
-        # M_rf = self.train_rf(df, a.seed)
-        # M_linear = self.train_linear(df, a.seed)
+        M_svm = self.train_svm(df, a.seed)
+        M_rf = self.train_rf(df, a.seed)
+        M_linear = self.train_linear(df, a.seed)
+        # M_dt = self.train_dt(df, a.seed)
 
         with pd.ExcelWriter(with_wrote('data/result/metrics_b.xlsx')) as writer:
             M_gbm.to_excel(writer, sheet_name='LightGBM')
-            # M_svm.to_excel(writer, sheet_name='SVM')
-            # M_rf.to_excel(writer, sheet_name='RandomForest')
-            # M_linear.to_excel(writer, sheet_name='Linear')
-
+            M_svm.to_excel(writer, sheet_name='SVM')
+            M_rf.to_excel(writer, sheet_name='RandomForest')
+            M_linear.to_excel(writer, sheet_name='Linear')
 
 
     class GbmCurveByFoldsArgs(CommonArgs):
