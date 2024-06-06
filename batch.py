@@ -630,50 +630,63 @@ class CLI(BaseMLCLI):
             M_rf.to_excel(writer, sheet_name='RandomForest')
             M_linear.to_excel(writer, sheet_name='Linear')
 
-    def run_plot_by_yamamuro_a(self, a):
+    class ScatterAndLineArgs(CommonArgs):
+        target: str = ['a', 'b', 'oe', 'alpha']
+
+    def run_scatter_and_line(self, a):
+        C = a.target
+        label = {
+            'a': 'Yamamuro A',
+            'b': 'Yamamuro B',
+            'oe': 'O-edge angle',
+            'alpha': 'Acetabular index',
+        }[C]
+
         dfs = load_data(0, True, a.seed)
         df = dfs['all']
-        df = df[df['side'].notna()]
+        df = df[df['side'].notna()].copy()
         colors = {'left': 'royalblue', 'right': 'crimson', 'healthy': 'gray'}
 
         def affected_side(row):
             if row['side'] == 'left':
-                return row['left_a']
+                return row[f'left_{C}']
             elif row['side'] == 'right':
-                return row['right_a']
+                return row[f'right_{C}']
             else:
                 return None
 
         def contra_side(row):
             if row['side'] == 'left':
-                return row['right_a']
+                return row[f'right_{C}']
             elif row['side'] == 'right':
-                return row['left_a']
+                return row[f'left_{C}']
             else:
                 return None
-        df.loc[:, 'affected_a'] = df.apply(affected_side, axis=1)
-        df.loc[:, 'contra_a'] = df.apply(contra_side, axis=1)
+        df.loc[:, 'affected'] = df.apply(affected_side, axis=1)
+        df.loc[:, 'contra'] = df.apply(contra_side, axis=1)
 
         model = LinearRegression()
-        model.fit(df['contra_a'].values[:, None], df['affected_a'].values)
+        model.fit(df['contra'].values[:, None], df['affected'].values)
         coefficient = model.coef_[0]
         intercept = model.intercept_
 
         # x_pred = np.linspace(df['contra_a'].min(), df['contra_a'].max(), 100)[:, None]
         # y_pred = model.predict(x_pred)
 
-        y_pred = model.predict(df['contra_a'].values[:, None])
-        r2 = skmetrics.r2_score(df['affected_a'].values, y_pred)
+        y_pred = model.predict(df['contra'].values[:, None])
+        r2 = skmetrics.r2_score(df['affected'].values, y_pred)
 
         fig, ax = plt.subplots(figsize=(6, 6))
         for category, group in df.groupby('side'):
-            ax.scatter(group['contra_a'], group['affected_a'], label=category, color=colors[category])
-        plt.plot(df['contra_a'].values, y_pred, color='black', label=f'Regression line: y = {coefficient:.2f}x + {intercept:.2f}')
-        ax.set_xlabel('Contra A')
-        ax.set_ylabel('Affected A')
+            ax.scatter(group['contra'], group['affected'], label=category, color=colors[category])
+        plt.plot(df['contra'].values, y_pred, color='black', label=f'Regression line: y = {coefficient:.2f}x + {intercept:.2f}')
+        ax.set_xlabel(f'Contra')
+        ax.set_ylabel(f'Affected')
         ax.legend()
-        plt.title(f'Yamamuro A. R-squared: {r2:.2f}')
-        plt.show()
+        plt.title(f'{label}. R-squared: {r2:.2f}')
+        print(C)
+        plt.savefig(f'out/scatter_line/{C}.png')
+        # plt.show()
 
     def run_boxplot(self, a):
         dfs = load_data(0, True, a.seed)
