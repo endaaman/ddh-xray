@@ -242,7 +242,7 @@ class CLI(BaseMLCLI):
         depths = ['b0', 'b4', 'b8']
         R = {}
 
-        with pd.ExcelWriter('data/result/metrics_ac.xlsx') as writer:
+        with pd.ExcelWriter('out/metrics_all/metrics_ac.xlsx') as writer:
             for mode in modes:
                 R[mode] = {}
                 for d in depths:
@@ -268,7 +268,8 @@ class CLI(BaseMLCLI):
 
                     R[mode][d] = M
                     df = pd.DataFrame(M)
-                    df.to_excel(writer, sheet_name=f'{mode}_{d}')
+                    setting = {'image': 'a', 'integrated': 'b'}[mode]
+                    df.to_excel(writer, sheet_name=f'{d}{setting}')
 
         # with open(with_wrote(f'data/result/all_metrics.json'), 'w', encoding='utf-8') as f:
         #     json.dump(R, f, indent=2)
@@ -624,7 +625,7 @@ class CLI(BaseMLCLI):
         M_linear = self.train_linear(df, a.seed)
         # M_dt = self.train_dt(df, a.seed)
 
-        with pd.ExcelWriter(with_wrote('data/result/metrics_b.xlsx')) as writer:
+        with pd.ExcelWriter(with_wrote('out/metrics_all/metrics_b.xlsx')) as writer:
             M_gbm.to_excel(writer, sheet_name='LightGBM')
             M_svm.to_excel(writer, sheet_name='SVM')
             M_rf.to_excel(writer, sheet_name='RandomForest')
@@ -1408,4 +1409,3 @@ class CLI(BaseMLCLI):
 if __name__ == '__main__':
     cli = CLI()
     cli.run()
-
