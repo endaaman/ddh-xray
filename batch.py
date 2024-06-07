@@ -405,13 +405,13 @@ class CLI(BaseMLCLI):
             # shap_values = explainer.shap_values(X=x_valid_shap)
 
             right_values = x_valid.rename(columns={
-                'left_a': 'Yamamuro A (contra)',
+                'left_a': 'Yamamuro A (contra.)',
                 'right_a': 'Yamamuro A (affected)',
-                'left_b': 'Yamamuro B (contra)',
+                'left_b': 'Yamamuro B (contra.)',
                 'right_b': 'Yamamuro B (affected)',
-                'left_alpha': 'Acetabular index (contra)',
+                'left_alpha': 'Acetabular index (contra.)',
                 'right_alpha': 'Acetabular index (affected)',
-                'left_oe': 'O-edge angle (contra)',
+                'left_oe': 'O-edge angle (contra.)',
                 'right_oe': 'O-edge angle (affected)',
             })[side_valid == 'right'].reset_index(drop=True)
             right_shap = explainer.shap_values(X=right_values)
@@ -420,11 +420,11 @@ class CLI(BaseMLCLI):
 
             left_values = x_valid.rename(columns={
                 'left_a': 'Yamamuro A (affected)',
-                'right_a': 'Yamamuro A (contra)',
+                'right_a': 'Yamamuro A (contra.)',
                 'left_b': 'Yamamuro B (affected)',
-                'right_b': 'Yamamuro B (contra)',
+                'right_b': 'Yamamuro B (contra.)',
                 'left_alpha': 'Acetabular index (affected)',
-                'right_alpha': 'Acetabular index (contra)',
+                'right_alpha': 'Acetabular index (contra.)',
                 'left_oe': 'O-edge angle (affected)',
                 'right_oe': 'O-edge angle (contra)',
             })[side_valid == 'left'].reset_index(drop=True)
