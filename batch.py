@@ -237,6 +237,9 @@ class CLI(BaseMLCLI):
             plt.show()
 
 
+    class CnnMetricsArgs(CommonArgs):
+        youden: bool = False
+
     def run_cnn_metrics(self, a):
         modes = ['image', 'integrated']
         depths = ['b0', 'b4', 'b8']
@@ -256,19 +259,12 @@ class CLI(BaseMLCLI):
 
                         fpr, tpr, thresholds = skmetrics.roc_curve(gt, pred)
                         precision, recall, _ = skmetrics.precision_recall_curve(gt, pred)
-                        youden_index = np.argmax(tpr - fpr)
-                        pred = pred > thresholds[youden_index]
-                        M.append({
-                            'roc_auc': skmetrics.auc(fpr, tpr),
-                            'pr_auc': skmetrics.auc(recall, precision),
-                            'acc': skmetrics.accuracy_score(gt, pred),
-                            'prec': skmetrics.precision_score(gt, pred),
-                            'f1': skmetrics.f1_score(gt, pred),
-                        })
+
+                        M.append(self.calc_metrics(gt, pred, youden=a.youden))
 
                     R[mode][d] = M
                     df = pd.DataFrame(M)
-                    setting = {'image': 'a', 'integrated': 'b'}[mode]
+                    setting = {'image': 'a', 'integrated': 'c'}[mode]
                     df.to_excel(writer, sheet_name=f'{d}{setting}')
 
         # with open(with_wrote(f'data/result/all_metrics.json'), 'w', encoding='utf-8') as f:
@@ -318,9 +314,34 @@ class CLI(BaseMLCLI):
             df.loc[df.index.isin(ii), 'fold'] = fold
         df.to_excel('data/table2.xlsx')
 
-    def train_gbm(self, df, seed):
-        shap.initjs()
 
+    def calc_metrics(self, gt, pred, youden=False):
+        fpr, tpr, thresholds = skmetrics.roc_curve(gt, pred)
+        precision, recall, _ = skmetrics.precision_recall_curve(gt, pred)
+
+        base = {
+            'roc_auc': skmetrics.auc(fpr, tpr),
+            'pr_auc': skmetrics.auc(recall, precision),
+        }
+
+        if youden:
+            youden_index = np.argmax(tpr - fpr)
+            p = pred > thresholds[youden_index]
+            return {
+                **base,
+                'acc': skmetrics.accuracy_score(gt, p),
+                # 'prec': skmetrics.precision_score(gt, p),
+                'f1': skmetrics.f1_score(gt, p),
+            }
+        return {
+            **base,
+            'acc': np.max([skmetrics.accuracy_score(gt, pred>t) for t in thresholds]),
+            'f1': np.max([skmetrics.f1_score(gt, pred>t, zero_division=0) for t in thresholds]),
+        }
+
+    def train_gbm(self, df, seed, youden=True, shap=False):
+        if shap:
+            shap.initjs()
         data = []
         ii = []
         M = []
@@ -370,105 +391,80 @@ class CLI(BaseMLCLI):
 
             pred_valid = model.predict(x_valid, num_iteration=model.best_iteration)
             gt, pred = y_valid, pred_valid
-
-            fpr, tpr, thresholds = skmetrics.roc_curve(gt, pred)
-            precision, recall, _ = skmetrics.precision_recall_curve(gt, pred)
-            youden_index = np.argmax(tpr - fpr)
-            pred = pred > thresholds[youden_index]
-
-            M.append({
-                'roc_auc': skmetrics.auc(fpr, tpr),
-                'pr_auc': skmetrics.auc(recall, precision),
-                'acc': skmetrics.accuracy_score(gt, pred),
-                'prec': skmetrics.precision_score(gt, pred),
-                'f1': skmetrics.f1_score(gt, pred),
-            })
-
-            # acc = [skmetrics.accuracy_score(y_valid, pred_valid>t) for t in thresholds]
-            # f1 = 2 * (acc * tpr) / (acc + tpr)
-            # precision, recall, __ = skmetrics.precision_recall_curve(y_valid, pred_valid)
-            # data.append({
-            #     'fpr': fpr,
-            #     'tpr': tpr,
-            #     'acc': acc,
-            #     'f1': f1,
-            #     'precision': precision,
-            #     'recall': recall,
-            # })
+            M.append(self.calc_metrics(gt, pred))
             i = model.feature_importance(importance_type='gain')
             # i = pd.DataFrame(data=i, index=cols_measure)
             ii.append(i)
 
-            explainer = shap.TreeExplainer(model=model)
+            if shap:
+                explainer = shap.TreeExplainer(model=model)
+                # x_valid_shap = x_valid.reset_index(drop=True)
+                # shap_values = explainer.shap_values(X=x_valid_shap)
+                right_values = x_valid.rename(columns={
+                    'left_a': 'Yamamuro A (contra.)',
+                    'right_a': 'Yamamuro A (affected)',
+                    'left_b': 'Yamamuro B (contra.)',
+                    'right_b': 'Yamamuro B (affected)',
+                    'left_alpha': 'Acetabular index (contra.)',
+                    'right_alpha': 'Acetabular index (affected)',
+                    'left_oe': 'O-edge angle (contra.)',
+                    'right_oe': 'O-edge angle (affected)',
+                })[side_valid == 'right'].reset_index(drop=True)
+                right_shap = explainer.shap_values(X=right_values)
+                right_valuess['values'].append(right_values)
+                right_valuess['shap'].append(right_shap)
 
-            # x_valid_shap = x_valid.reset_index(drop=True)
-            # shap_values = explainer.shap_values(X=x_valid_shap)
+                left_values = x_valid.rename(columns={
+                    'left_a': 'Yamamuro A (affected)',
+                    'right_a': 'Yamamuro A (contra.)',
+                    'left_b': 'Yamamuro B (affected)',
+                    'right_b': 'Yamamuro B (contra.)',
+                    'left_alpha': 'Acetabular index (affected)',
+                    'right_alpha': 'Acetabular index (contra.)',
+                    'left_oe': 'O-edge angle (affected)',
+                    'right_oe': 'O-edge angle (contra)',
+                })[side_valid == 'left'].reset_index(drop=True)
+                left_shap = explainer.shap_values(X=left_values)
+                left_valuess['values'].append(left_values)
+                left_valuess['shap'].append(left_shap)
 
-            right_values = x_valid.rename(columns={
-                'left_a': 'Yamamuro A (contra.)',
-                'right_a': 'Yamamuro A (affected)',
-                'left_b': 'Yamamuro B (contra.)',
-                'right_b': 'Yamamuro B (affected)',
-                'left_alpha': 'Acetabular index (contra.)',
-                'right_alpha': 'Acetabular index (affected)',
-                'left_oe': 'O-edge angle (contra.)',
-                'right_oe': 'O-edge angle (affected)',
-            })[side_valid == 'right'].reset_index(drop=True)
-            right_shap = explainer.shap_values(X=right_values)
-            right_valuess['values'].append(right_values)
-            right_valuess['shap'].append(right_shap)
+                x_valid = x_valid.rename(columns=col_to_label)
 
-            left_values = x_valid.rename(columns={
-                'left_a': 'Yamamuro A (affected)',
-                'right_a': 'Yamamuro A (contra.)',
-                'left_b': 'Yamamuro B (affected)',
-                'right_b': 'Yamamuro B (contra.)',
-                'left_alpha': 'Acetabular index (affected)',
-                'right_alpha': 'Acetabular index (contra.)',
-                'left_oe': 'O-edge angle (affected)',
-                'right_oe': 'O-edge angle (contra)',
-            })[side_valid == 'left'].reset_index(drop=True)
-            left_shap = explainer.shap_values(X=left_values)
-            left_valuess['values'].append(left_values)
-            left_valuess['shap'].append(left_shap)
+                all_values = x_valid.reset_index(drop=True)
+                all_shap = explainer.shap_values(X=all_values)
+                all_valuess['values'].append(all_values)
+                all_valuess['shap'].append(all_shap)
+                # shap.summary_plot(right_shap, right_values)
+                # plt.show()
 
-            x_valid = x_valid.rename(columns=col_to_label)
+        if shap:
+            shap.summary_plot(
+                    np.concatenate(right_valuess['shap']),
+                    pd.concat(right_valuess['values']),
+                    show=False)
+            plt.savefig('out/shap/right.png')
+            plt.clf()
 
-            all_values = x_valid.reset_index(drop=True)
-            all_shap = explainer.shap_values(X=all_values)
-            all_valuess['values'].append(all_values)
-            all_valuess['shap'].append(all_shap)
+            shap.summary_plot(
+                    np.concatenate(left_valuess['shap']),
+                    pd.concat(left_valuess['values']),
+                    show=False)
+            plt.savefig('out/shap/left.png')
+            plt.clf()
 
-            # shap.summary_plot(right_shap, right_values)
-            # plt.show()
+            shap.summary_plot(
+                    np.concatenate(left_valuess['shap'] + right_valuess['shap']),
+                    pd.concat(left_valuess['values'] + right_valuess['values']),
+                    show=False)
+            plt.savefig('out/shap/merged.png')
+            plt.clf()
 
-        shap.summary_plot(
-                np.concatenate(right_valuess['shap']),
-                pd.concat(right_valuess['values']),
-                show=False)
-        plt.savefig('out/shap/right.png')
-        plt.clf()
-
-        shap.summary_plot(
-                np.concatenate(left_valuess['shap']),
-                pd.concat(left_valuess['values']),
-                show=False)
-        plt.savefig('out/shap/left.png')
-        plt.clf()
-
-        shap.summary_plot(
-                np.concatenate(left_valuess['shap'] + right_valuess['shap']),
-                pd.concat(left_valuess['values'] + right_valuess['values']),
-                show=False)
-        plt.savefig('out/shap/merged.png')
-        plt.clf()
-
-        shap.summary_plot(
-                np.concatenate(all_valuess['shap']),
-                pd.concat(all_valuess['values']),
-                show=False)
-        plt.savefig('out/shap/all.png')
-        plt.clf()
+            shap.summary_plot(
+                    np.concatenate(all_valuess['shap']),
+                    pd.concat(all_valuess['values']),
+                    show=False)
+            plt.savefig('out/shap/all.png')
+            plt.clf()
 
         data = pd.DataFrame(data)
         M = pd.DataFrame(M)
@@ -477,7 +473,7 @@ class CLI(BaseMLCLI):
 
         plt.savefig('out/shap/all.png')
 
-    def train_svm(self, df, seed):
+    def train_svm(self, df, seed, youden=True):
         M = []
         for fold in [1,2,3,4,5,6]:
             df_train = df[df['fold'] != fold]
@@ -509,19 +505,11 @@ class CLI(BaseMLCLI):
 
             fpr, tpr, thresholds = skmetrics.roc_curve(gt, pred)
             precision, recall, _ = skmetrics.precision_recall_curve(gt, pred)
-            youden_index = np.argmax(tpr - fpr)
-            pred = pred > thresholds[youden_index]
-            M.append({
-                'roc_auc': skmetrics.auc(fpr, tpr),
-                'pr_auc': skmetrics.auc(recall, precision),
-                'acc': skmetrics.accuracy_score(gt, pred),
-                'prec': skmetrics.precision_score(gt, pred),
-                'f1': skmetrics.f1_score(gt, pred),
-            })
+            M.append(self.calc_metrics(gt, pred))
 
         return pd.DataFrame(M)
 
-    def train_rf(self, df, seed):
+    def train_rf(self, df, seed, youden=True):
         M = []
         for fold in [1,2,3,4,5,6]:
             df_train = df[df['fold'] != fold]
@@ -539,18 +527,10 @@ class CLI(BaseMLCLI):
 
             fpr, tpr, thresholds = skmetrics.roc_curve(gt, pred)
             precision, recall, _ = skmetrics.precision_recall_curve(gt, pred)
-            youden_index = np.argmax(tpr - fpr)
-            pred = pred > thresholds[youden_index]
-            M.append({
-                'roc_auc': skmetrics.auc(fpr, tpr),
-                'pr_auc': skmetrics.auc(recall, precision),
-                'acc': skmetrics.accuracy_score(gt, pred),
-                'prec': skmetrics.precision_score(gt, pred),
-                'f1': skmetrics.f1_score(gt, pred),
-            })
+            M.append(self.calc_metrics(gt, pred))
         return pd.DataFrame(M)
 
-    def train_dt(self, df, seed):
+    def train_dt(self, df, seed, youden=True):
         M = []
         for fold in [1,2,3,4,5,6]:
             df_train = df[df['fold'] != fold]
@@ -568,15 +548,7 @@ class CLI(BaseMLCLI):
 
             fpr, tpr, thresholds = skmetrics.roc_curve(gt, pred)
             precision, recall, _ = skmetrics.precision_recall_curve(gt, pred)
-            youden_index = np.argmax(tpr - fpr)
-            pred = pred > thresholds[youden_index]
-            M.append({
-                'roc_auc': skmetrics.auc(fpr, tpr),
-                'pr_auc': skmetrics.auc(recall, precision),
-                'acc': skmetrics.accuracy_score(gt, pred),
-                'prec': skmetrics.precision_score(gt, pred),
-                'f1': skmetrics.f1_score(gt, pred),
-            })
+            M.append(self.calc_metrics(gt, pred))
 
         plot_tree(clf)
         plt.show()
@@ -584,7 +556,7 @@ class CLI(BaseMLCLI):
         return pd.DataFrame(M)
 
 
-    def train_linear(self, df, seed):
+    def train_linear(self, df, seed, youden=True):
         M = []
         for fold in [1,2,3,4,5,6]:
             df_train = df[df['fold'] != fold]
@@ -602,27 +574,22 @@ class CLI(BaseMLCLI):
 
             fpr, tpr, thresholds = skmetrics.roc_curve(gt, pred)
             precision, recall, _ = skmetrics.precision_recall_curve(gt, pred)
-            youden_index = np.argmax(tpr - fpr)
-            pred = pred > thresholds[youden_index]
-            M.append({
-                'roc_auc': skmetrics.auc(fpr, tpr),
-                'pr_auc': skmetrics.auc(recall, precision),
-                'acc': skmetrics.accuracy_score(gt, pred),
-                'prec': skmetrics.precision_score(gt, pred),
-                'f1': skmetrics.f1_score(gt, pred),
-            })
+            M.append(self.calc_metrics(gt, pred))
 
         return pd.DataFrame(M)
 
+    class TabularMetricsArgs(CommonArgs):
+        shap: bool = False
+        youden: bool = False
 
     def run_tabular_metrics(self, a):
         dfs = load_data(0, True, a.seed)
         df = dfs['all']
 
-        M_gbm, importance = self.train_gbm(df, a.seed)
-        M_svm = self.train_svm(df, a.seed)
-        M_rf = self.train_rf(df, a.seed)
-        M_linear = self.train_linear(df, a.seed)
+        M_gbm, importance = self.train_gbm(df, a.seed, youden=a.youden, shapr=a.shap)
+        M_svm = self.train_svm(df, a.seed, youden=a.youden)
+        M_rf = self.train_rf(df, a.seed, youden=a.youden)
+        M_linear = self.train_linear(df, a.seed, youden=a.youden)
         # M_dt = self.train_dt(df, a.seed)
 
         with pd.ExcelWriter(with_wrote('out/metrics_all/metrics_b.xlsx')) as writer:
@@ -893,32 +860,40 @@ class CLI(BaseMLCLI):
         data_A = []
         data_C = []
         for fold in range(1,7):
+
             for mode, data in [('image', data_A), ('integrated', data_C)]:
                 pred_path = f'{base}/{mode}/tf_efficientnet_{depth}_fold{fold}/predictions.pt'
                 pred = torch.load(pred_path, map_location=torch.device('cpu'))
                 gts = pred['val_gts'].flatten().numpy()
                 preds = pred['val_preds'].flatten().numpy()
                 fpr, tpr, thresholds = skmetrics.roc_curve(gts, preds)
-                acc = [skmetrics.accuracy_score(gts, preds>t) for t in thresholds]
-                f1 = 2 * (acc * tpr) / (acc + tpr)
-                precision, recall, __ = skmetrics.precision_recall_curve(gts, preds)
-                data.append({
-                    'fpr': fpr,
-                    'tpr': tpr,
-                    'acc': acc,
-                    'f1': f1,
-                    'thresholds': thresholds,
-                    'recall': recall,
-                    'precision': precision,
-                })
+
+                data.append(self.calc_metrics(gts, preds))
+                # acc = [skmetrics.accuracy_score(gts, preds>t) for t in thresholds]
+                # f1 = 2 * (acc * tpr) / (acc + tpr)
+                # precision, recall, __ = skmetrics.precision_recall_curve(gts, preds)
+                # data.append({
+                #     'fpr': fpr,
+                #     'tpr': tpr,
+                #     'acc': acc,
+                #     'f1': f1,
+                #     'thresholds': thresholds,
+                #     'recall': recall,
+                #     'precision': precision,
+                # })
         data_A = pd.DataFrame(data_A)
         data_C = pd.DataFrame(data_C)
 
         dfs = load_data(0, True, seed)
         df = dfs['all']
         data_B, __ii = self.train_gbm(df, seed)
-
         return data_A, data_B, data_C
+
+    def run_abc(self, a):
+        data_A, data_B, data_C = self.load_ABC('b0', a.seed)
+        print(data_A)
+        print(data_B)
+        print(data_C)
 
 
     class CompareCurveArgs(CommonArgs):
@@ -1034,23 +1009,26 @@ class CLI(BaseMLCLI):
             plt.show()
 
     class CompareMetricArgs(CommonArgs):
-        metric: str = Field(..., regex=r'^acc|f1$')
-        graph: str = Field(..., regex=r'^bar|box$')
-        depth: str = Field(..., regex=r'^b0|b4|b8$')
-        noshow: bool = Field(False, cli=('--noshow', ))
+        metric: str = ['acc', 'f1']
+        graph: str = ['bar', 'box']
+        depth: str = ['b0', 'b4', 'b8']
+        noshow: bool = False
 
     def run_compare_metric(self, a):
         data_A, data_B, data_C = self.load_ABC(a.depth, a.seed)
         dd = []
         for data, setting in [(data_A, 'A'), (data_B, 'B'), (data_C, 'C'), ]:
             for fold, row in data.iterrows():
-                tpr, fpr, acc, f1 = row['tpr'], row['fpr'], row['acc'], row['f1']
-                # i = np.argmax(f1)
-                i = np.argmax(tpr - fpr)
-                value = acc if a.metric == 'acc' else f1
-                dd.append({'value': np.max(value), 'setting': setting, 'threshold': i+1})
-
+                dd.append({'value': row[a.metric], 'setting': setting})
+            # for fold, row in data.iterrows():
+            #     tpr, fpr, acc, f1 = row['tpr'], row['fpr'], row['acc'], row['f1']
+            #     # i = np.argmax(f1)
+            #     i = np.argmax(tpr - fpr)
+            #     value = acc if a.metric == 'acc' else f1
+            #     dd.append({'value': np.max(value), 'setting': setting, 'threshold': i+1})
         data = pd.DataFrame(dd)
+
+
         fig, ax = plt.subplots(figsize=(6, 4), dpi=300)
         if a.graph == 'box':
             sns.boxplot(
@@ -1103,9 +1081,9 @@ class CLI(BaseMLCLI):
         plt.ylabel(title)
         # ax.get_legend().remove()
         plt.subplots_adjust(bottom=0.15, left=0.2)
-        os.makedirs(f'out/fig2/{a.depth}', exist_ok=True)
-        plt.savefig(f'out/fig2/{a.depth}/all_{a.graph}_{a.metric}.png')
-        data.to_excel(f'out/fig2/{a.depth}/{a.metric}.xlsx')
+        # os.makedirs(f'out/fig2/{a.depth}', exist_ok=True)
+        plt.savefig(f'out/fig2/{a.depth}_{a.graph}_{a.metric}.png')
+        # data.to_excel(f'out/fig2/{a.depth}/{a.metric}.xlsx')
         if not a.noshow:
             plt.show()
 
